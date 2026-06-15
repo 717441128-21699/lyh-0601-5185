@@ -94,6 +94,8 @@ export const mockFurnaces: CremationFurnace[] = [
     status: 'running',
     currentFamily: '张氏家属',
     position: [-6, 0, 6],
+    workOrders: [],
+    maintenanceWorkOrderGenerated: false,
   },
   {
     id: 'furnace-2',
@@ -105,6 +107,8 @@ export const mockFurnaces: CremationFurnace[] = [
     status: 'warning',
     currentFamily: '李氏家属',
     position: [-2, 0, 6],
+    workOrders: [],
+    maintenanceWorkOrderGenerated: false,
   },
   {
     id: 'furnace-3',
@@ -115,6 +119,8 @@ export const mockFurnaces: CremationFurnace[] = [
     maintenanceThreshold: 500,
     status: 'idle',
     position: [2, 0, 6],
+    workOrders: [],
+    maintenanceWorkOrderGenerated: false,
   },
   {
     id: 'furnace-4',
@@ -125,6 +131,20 @@ export const mockFurnaces: CremationFurnace[] = [
     maintenanceThreshold: 500,
     status: 'maintenance',
     position: [6, 0, 6],
+    workOrders: [
+      {
+        id: 'wo-1',
+        furnaceId: 'furnace-4',
+        furnaceName: '四号火化炉',
+        type: 'routine',
+        description: '累计使用达到保养阈值，需进行常规维护检查',
+        status: 'in_progress',
+        createdAt: new Date(now.getTime() - 2 * 3600000),
+        priority: 'high',
+        assignedTo: '张工',
+      },
+    ],
+    maintenanceWorkOrderGenerated: true,
   },
 ];
 
@@ -215,6 +235,8 @@ export const mockSchedules: ServiceSchedule[] = [
     status: 'confirmed',
     confirmed: true,
     familyName: '张氏家属',
+    confirmDeadline: new Date(now.getTime() - 60 * 60000),
+    appointmentId: 'apt-1',
   },
   {
     id: 'sch-2',
@@ -225,6 +247,8 @@ export const mockSchedules: ServiceSchedule[] = [
     status: 'confirmed',
     confirmed: true,
     familyName: '李氏家属',
+    confirmDeadline: new Date(now.getTime() - 45 * 60000),
+    appointmentId: 'apt-2',
   },
   {
     id: 'sch-3',
@@ -236,6 +260,8 @@ export const mockSchedules: ServiceSchedule[] = [
     confirmed: false,
     familyName: '王氏家属',
     escalated: false,
+    confirmDeadline: new Date(now.getTime() + 15 * 60000),
+    appointmentId: 'apt-3',
   },
   {
     id: 'sch-4',
@@ -246,7 +272,9 @@ export const mockSchedules: ServiceSchedule[] = [
     status: 'pending',
     confirmed: false,
     familyName: '赵氏家属',
-    escalated: true,
+    escalated: false,
+    confirmDeadline: new Date(now.getTime() + 2 * 60000),
+    appointmentId: 'apt-new-1',
   },
 ];
 

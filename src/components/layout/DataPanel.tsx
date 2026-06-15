@@ -4,7 +4,15 @@ import { useAppStore } from '../../store/useAppStore';
 export default function DataPanel() {
   const alerts = useAppStore((s) => s.alerts);
   const resolveAlert = useAppStore((s) => s.resolveAlert);
+  const getHallUsageRate = useAppStore((s) => s.getHallUsageRate);
+  const getFurnaceUsageRate = useAppStore((s) => s.getFurnaceUsageRate);
+  const getSlotUsageRate = useAppStore((s) => s.getSlotUsageRate);
+
   const unresolved = alerts.filter((a) => !a.resolved);
+
+  const hallUsage = getHallUsageRate();
+  const furnaceUsage = getFurnaceUsageRate();
+  const slotUsage = getSlotUsageRate();
 
   const typeStyles = {
     error: {
@@ -45,7 +53,7 @@ export default function DataPanel() {
             <p className="text-sm">暂无待处理告警</p>
           </div>
         )}
-        {unresolved.map((alert) => {
+        {unresolved.slice().reverse().map((alert) => {
           const style = typeStyles[alert.type];
           const Icon = style.icon;
           return (
@@ -77,28 +85,37 @@ export default function DataPanel() {
         <div>
           <div className="flex justify-between text-xs mb-1">
             <span className="text-slate-400">告别厅使用率</span>
-            <span className="text-white font-medium">50%</span>
+            <span className="text-white font-medium">{hallUsage.toFixed(1)}%</span>
           </div>
           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div className="h-full w-1/2 bg-gradient-to-r from-blue-500 to-blue-400 rounded-full" />
+            <div
+              className="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full transition-all duration-500"
+              style={{ width: `${hallUsage}%` }}
+            />
           </div>
         </div>
         <div>
           <div className="flex justify-between text-xs mb-1">
             <span className="text-slate-400">火化炉使用率</span>
-            <span className="text-white font-medium">50%</span>
+            <span className="text-white font-medium">{furnaceUsage.toFixed(1)}%</span>
           </div>
           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div className="h-full w-1/2 bg-gradient-to-r from-orange-500 to-orange-400 rounded-full" />
+            <div
+              className="h-full bg-gradient-to-r from-orange-500 to-orange-400 rounded-full transition-all duration-500"
+              style={{ width: `${furnaceUsage}%` }}
+            />
           </div>
         </div>
         <div>
           <div className="flex justify-between text-xs mb-1">
             <span className="text-slate-400">寄存格口占用率</span>
-            <span className="text-white font-medium">70%</span>
+            <span className="text-white font-medium">{slotUsage.toFixed(1)}%</span>
           </div>
           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div className="h-full w-[70%] bg-gradient-to-r from-amber-500 to-amber-400 rounded-full" />
+            <div
+              className="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-full transition-all duration-500"
+              style={{ width: `${slotUsage}%` }}
+            />
           </div>
         </div>
       </div>

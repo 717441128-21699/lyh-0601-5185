@@ -1,4 +1,5 @@
 import { useAppStore } from '../store/useAppStore';
+import { useMemo } from 'react';
 import {
   Users2,
   Mic,
@@ -8,9 +9,9 @@ import {
   Clock,
   AlertTriangle,
   CheckCircle2,
-  XCircle,
   Phone,
   ChevronRight,
+  Timer,
 } from 'lucide-react';
 
 export default function Services() {
@@ -18,6 +19,7 @@ export default function Services() {
   const vehicles = useAppStore((s) => s.vehicles);
   const schedules = useAppStore((s) => s.schedules);
   const confirmSchedule = useAppStore((s) => s.confirmSchedule);
+  const currentTime = useAppStore((s) => s.currentTime);
 
   const roleIcons: Record<string, any> = {
     '司仪': Mic,
@@ -46,14 +48,48 @@ export default function Services() {
     '维护中': 'text-red-400',
   };
 
+  const sortedSchedules = useMemo(
+    () =>
+      [...schedules].sort((a, b) => {
+        const statusOrder = { escalated: 0, pending: 1, confirmed: 2, completed: 3 };
+        const orderA = statusOrder[a.escalated ? 'escalated' : a.status] ?? 4;
+        const orderB = statusOrder[b.escalated ? 'escalated' : b.status] ?? 4;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.startTime.getTime() - b.startTime.getTime();
+      }),
+    [schedules],
+  );
+
+  const getRemainingConfirmTime = (deadline: Date) => {
+    const diff = deadline.getTime() - currentTime.getTime();
+    if (diff <= 0) return { text: '已超时', urgent: true };
+    const minutes = Math.ceil(diff / 60000);
+    if (minutes <= 5) return { text: `${minutes}分钟`, urgent: true };
+    return { text: `${minutes}分钟`, urgent: false };
+  };
+
   return (
     <div className="flex h-full flex-col">
-      <div className="p-4 border-b border-slate-700">
-        <h2 className="text-xl font-bold text-white flex items-center gap-2" style={{ fontFamily: 'Noto Serif SC, serif' }}>
-          <Users2 className="w-6 h-6 text-amber-400" />
-          治丧服务调度
-        </h2>
-        <p className="text-slate-400 text-sm mt-1">司仪、乐队、灵车自动排班，超时升级主管</p>
+      <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-white flex items-center gap-2" style={{ fontFamily: 'Noto Serif SC, serif' }}>
+            <Users2 className="w-6 h-6 text-amber-400" />
+            治丧服务调度
+          </h2>
+          <p className="text-slate-400 text-sm mt-1">
+            司仪、乐队、灵车自动分配排班，超时未确认自动升级主管
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-sm">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 rounded-lg border border-amber-700">
+            <Clock className="w-4 h-4 text-amber-400" />
+            <span className="text-amber-300">待确认：{schedules.filter((s) => !s.confirmed && !s.escalated).length}</span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-red-900/30 rounded-lg border border-red-700">
+            <AlertTriangle className="w-4 h-4 text-red-400" />
+            <span className="text-red-300">已升级：{schedules.filter((s) => s.escalated).length}</span>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-hidden flex">
@@ -61,19 +97,24 @@ export default function Services() {
           <div>
             <h3 className="text-white font-medium mb-3 flex items-center gap-2">
               <UserCheck className="w-4 h-4 text-amber-400" />
-              服务排班
+              服务排班列表（按紧急度排序）
             </h3>
             <div className="grid gap-3">
-              {schedules.map((sch) => {
+              {sortedSchedules.map((sch) => {
                 const status = sch.escalated ? statusStyles.escalated : statusStyles[sch.status];
                 const Icon = roleIcons[sch.type] || Users2;
                 const staffMember = sch.staffId ? staff.find((s) => s.id === sch.staffId) : null;
                 const vehicle = sch.vehicleId ? vehicles.find((v) => v.id === sch.vehicleId) : null;
+                const confirmTime = !sch.confirmed
+                  ? getRemainingConfirmTime(sch.confirmDeadline)
+                  : null;
 
                 return (
                   <div
                     key={sch.id}
-                    className={`${status.bg} border rounded-xl p-4 transition-all hover:scale-[1.005]`}
+                    className={`${status.bg} border rounded-xl p-4 transition-all hover:scale-[1.005] ${
+                      confirmTime?.urgent ? 'animate-pulse shadow-lg' : ''
+                    }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -81,7 +122,7 @@ export default function Services() {
                           <Icon className={`w-5 h-5 ${status.color}`} />
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="text-white font-bold">{sch.type}</h4>
                             <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-900/60 ${status.color}`}>
                               <status.icon className="w-3 h-3" />
@@ -90,7 +131,19 @@ export default function Services() {
                             {sch.escalated && (
                               <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-900/60 text-red-300 border border-red-700">
                                 <AlertTriangle className="w-3 h-3" />
-                                已升级主管
+                                已升级主管处理
+                              </span>
+                            )}
+                            {confirmTime && !sch.escalated && (
+                              <span
+                                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
+                                  confirmTime.urgent
+                                    ? 'bg-red-900/60 text-red-300 border border-red-700'
+                                    : 'bg-blue-900/60 text-blue-300 border border-blue-700'
+                                }`}
+                              >
+                                <Timer className="w-3 h-3" />
+                                确认截止：{confirmTime.text}
                               </span>
                             )}
                           </div>
@@ -102,7 +155,7 @@ export default function Services() {
                               {sch.endTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                             </span>
                             <ChevronRight className="w-3 h-3" />
-                            <span className="text-slate-200">{sch.familyName}</span>
+                            <span className="text-slate-200 font-medium">{sch.familyName}</span>
                           </div>
                         </div>
                       </div>
@@ -110,7 +163,7 @@ export default function Services() {
                       <div className="flex items-center gap-3">
                         {staffMember && (
                           <div className="text-right">
-                            <div className="text-sm text-white">{staffMember.name}</div>
+                            <div className="text-sm text-white font-medium">{staffMember.name}</div>
                             <div className={`text-xs ${staffStatusColor[staffMember.status as keyof typeof staffStatusColor]}`}>
                               {staffMember.status}
                             </div>
@@ -118,23 +171,32 @@ export default function Services() {
                         )}
                         {vehicle && (
                           <div className="text-right">
-                            <div className="text-sm text-white font-mono">{vehicle.plateNumber}</div>
+                            <div className="text-sm text-white font-mono font-medium">{vehicle.plateNumber}</div>
                             <div className={`text-xs ${vehicleStatusColor[vehicle.status as keyof typeof vehicleStatusColor]}`}>
                               {vehicle.status}
                             </div>
                           </div>
                         )}
-                        {!sch.confirmed && (
+                        {!sch.confirmed && !sch.escalated && (
                           <button
                             onClick={() => confirmSchedule(sch.id)}
-                            className="flex items-center gap-1 px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-sm rounded-lg transition-all shadow-lg shadow-amber-900/30"
+                            className="flex items-center gap-1 px-5 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-sm rounded-lg transition-all shadow-lg shadow-amber-900/30 font-medium"
                           >
                             <CheckCircle2 className="w-4 h-4" />
-                            确认
+                            确认排班
+                          </button>
+                        )}
+                        {sch.escalated && !sch.confirmed && (
+                          <button
+                            onClick={() => confirmSchedule(sch.id)}
+                            className="flex items-center gap-1 px-5 py-2 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white text-sm rounded-lg transition-all shadow-lg shadow-red-900/30 font-medium"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            主管确认
                           </button>
                         )}
                         {sch.confirmed && (
-                          <div className="flex items-center gap-1 text-green-400 text-sm">
+                          <div className="flex items-center gap-1 text-green-400 text-sm font-medium">
                             <CheckCircle2 className="w-4 h-4" />
                             已确认
                           </div>
@@ -155,6 +217,9 @@ export default function Services() {
           <div className="p-3 space-y-2">
             {staff.map((s) => {
               const RoleIcon = roleIcons[s.role] || Users2;
+              const busyCount = schedules.filter(
+                (sch) => sch.staffId === s.id && !sch.confirmed && sch.status !== 'completed',
+              ).length;
               return (
                 <div key={s.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-3 hover:border-slate-600 transition-colors">
                   <div className="flex items-center justify-between">
@@ -167,8 +232,15 @@ export default function Services() {
                         <div className="text-xs text-slate-400">{s.role}</div>
                       </div>
                     </div>
-                    <div className={`text-xs ${staffStatusColor[s.status as keyof typeof staffStatusColor]}`}>
-                      {s.status}
+                    <div className="flex items-center gap-2">
+                      {busyCount > 0 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">
+                          {busyCount}待确认
+                        </span>
+                      )}
+                      <span className={`text-xs ${staffStatusColor[s.status as keyof typeof staffStatusColor]}`}>
+                        {s.status}
+                      </span>
                     </div>
                   </div>
                   <div className="mt-2 flex items-center gap-1 text-xs text-slate-500">
@@ -184,29 +256,41 @@ export default function Services() {
             <h3 className="text-white font-medium">车辆状态</h3>
           </div>
           <div className="p-3 space-y-2">
-            {vehicles.map((v) => (
-              <div key={v.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center">
-                      <Car className="w-4 h-4 text-blue-400" />
+            {vehicles.map((v) => {
+              const busyCount = schedules.filter(
+                (sch) => sch.vehicleId === v.id && !sch.confirmed && sch.status !== 'completed',
+              ).length;
+              return (
+                <div key={v.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center">
+                        <Car className="w-4 h-4 text-blue-400" />
+                      </div>
+                      <div>
+                        <div className="text-white text-sm font-mono font-medium">{v.plateNumber}</div>
+                        <div className="text-xs text-slate-400">{v.type}</div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-white text-sm font-mono font-medium">{v.plateNumber}</div>
-                      <div className="text-xs text-slate-400">{v.type}</div>
+                    <div className="flex items-center gap-2">
+                      {busyCount > 0 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">
+                          {busyCount}待确认
+                        </span>
+                      )}
+                      <span className={`text-xs ${vehicleStatusColor[v.status as keyof typeof vehicleStatusColor]}`}>
+                        {v.status}
+                      </span>
                     </div>
                   </div>
-                  <div className={`text-xs ${vehicleStatusColor[v.status as keyof typeof vehicleStatusColor]}`}>
-                    {v.status}
-                  </div>
+                  {v.currentTask && (
+                    <div className="mt-2 text-xs text-blue-300 bg-blue-900/30 rounded px-2 py-1">
+                      {v.currentTask}
+                    </div>
+                  )}
                 </div>
-                {v.currentTask && (
-                  <div className="mt-2 text-xs text-blue-300 bg-blue-900/30 rounded px-2 py-1">
-                    {v.currentTask}
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

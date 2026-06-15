@@ -3,6 +3,8 @@ export type FurnaceStatus = 'running' | 'idle' | 'maintenance' | 'warning' | 'er
 export type SlotStatus = 'occupied' | 'available' | 'expiring' | 'expired' | 'locked';
 export type StaffRole = '司仪' | '乐队' | '灵车司机';
 export type ScheduleStatus = 'pending' | 'confirmed' | 'completed' | 'escalated';
+export type WorkOrderStatus = 'pending' | 'in_progress' | 'completed';
+export type AllocationStatus = 'success' | 'conflict' | 'no_available';
 
 export interface FarewellHall {
   id: string;
@@ -24,6 +26,37 @@ export interface Appointment {
   priority: number;
   status: 'scheduled' | 'in_progress' | 'completed';
   attendees: number;
+  needsEmcee?: boolean;
+  needsBand?: boolean;
+  needsVehicle?: boolean;
+}
+
+export interface AllocationResult {
+  status: AllocationStatus;
+  assignedHallId?: string;
+  assignedHallName?: string;
+  conflicts: Array<{
+    appointmentId: string;
+    familyName: string;
+    oldHallId: string;
+    oldHallName: string;
+    newHallId?: string;
+    newHallName?: string;
+    adjusted: boolean;
+  }>;
+  message: string;
+}
+
+export interface MaintenanceWorkOrder {
+  id: string;
+  furnaceId: string;
+  furnaceName: string;
+  type: 'routine' | 'temperature' | 'repair';
+  description: string;
+  status: WorkOrderStatus;
+  createdAt: Date;
+  assignedTo?: string;
+  priority: 'low' | 'medium' | 'high';
 }
 
 export interface CremationFurnace {
@@ -36,6 +69,8 @@ export interface CremationFurnace {
   status: FurnaceStatus;
   currentFamily?: string;
   position: [number, number, number];
+  workOrders: MaintenanceWorkOrder[];
+  maintenanceWorkOrderGenerated?: boolean;
 }
 
 export interface ColumbariumSlot {
@@ -76,6 +111,8 @@ export interface ServiceSchedule {
   confirmed: boolean;
   familyName: string;
   escalated?: boolean;
+  confirmDeadline: Date;
+  appointmentId?: string;
 }
 
 export interface DailyStats {
@@ -93,4 +130,18 @@ export interface AlertItem {
   message: string;
   time: Date;
   resolved: boolean;
+  source?: string;
+  relatedId?: string;
+}
+
+export interface NewAppointmentRequest {
+  familyName: string;
+  startTime: Date;
+  durationMinutes: number;
+  spec: '标准' | '豪华' | 'VIP';
+  priority: number;
+  attendees: number;
+  needsEmcee: boolean;
+  needsBand: boolean;
+  needsVehicle: boolean;
 }

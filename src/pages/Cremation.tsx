@@ -8,10 +8,18 @@ import {
   CheckCircle2,
   Gauge,
   Activity,
+  Clock,
+  User,
+  ArrowRight,
+  CheckCircle,
+  PlayCircle,
+  PauseCircle,
 } from 'lucide-react';
+import type { MaintenanceWorkOrder } from '../types';
 
 export default function Cremation() {
   const furnaces = useAppStore((s) => s.furnaces);
+  const updateWorkOrderStatus = useAppStore((s) => s.updateWorkOrderStatus);
 
   const statusConfig = {
     running: { label: '运行中', icon: Flame, color: 'text-blue-400', bg: 'bg-blue-900/30 border-blue-700' },
@@ -21,20 +29,132 @@ export default function Cremation() {
     error: { label: '故障', icon: AlertTriangle, color: 'text-red-400', bg: 'bg-red-900/30 border-red-700' },
   };
 
+  const workOrderStatusConfig = {
+    pending: { label: '待处理', icon: PauseCircle, color: 'text-amber-400', bg: 'bg-amber-900/30', btn: '开始' },
+    in_progress: { label: '进行中', icon: PlayCircle, color: 'text-blue-400', bg: 'bg-blue-900/30', btn: '完成' },
+    completed: { label: '已完成', icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-900/30', btn: '' },
+  };
+
+  const allWorkOrders = furnaces.flatMap((f) =>
+    f.workOrders.map((wo) => ({ ...wo, furnaceId: f.id, furnaceName: f.name })),
+  );
+
   return (
     <div className="flex h-full">
       <div className="flex-1 flex flex-col">
-        <div className="p-4 border-b border-slate-700">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2" style={{ fontFamily: 'Noto Serif SC, serif' }}>
-            <Flame className="w-6 h-6 text-orange-400" />
-            火化车间监控
-          </h2>
-          <p className="text-slate-400 text-sm mt-1">实时监控炉温、累计使用、保养倒计时</p>
+        <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2" style={{ fontFamily: 'Noto Serif SC, serif' }}>
+              <Flame className="w-6 h-6 text-orange-400" />
+              火化车间监控 · 维护管理
+            </h2>
+            <p className="text-slate-400 text-sm mt-1">炉温监控、保养预警、维护工单全链路管理</p>
+          </div>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-slate-400">待处理工单：</span>
+            <span className="px-3 py-1 bg-amber-900/50 text-amber-300 rounded-full font-medium border border-amber-700">
+              {allWorkOrders.filter((wo) => wo.status === 'pending').length}
+            </span>
+          </div>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1">
-            <Scene3D view="cremation" />
+          <div className="flex-1 flex flex-col">
+            <div className="flex-1">
+              <Scene3D view="cremation" />
+            </div>
+
+            <div className="border-t border-slate-700 p-4 bg-slate-900/50">
+              <h4 className="text-sm text-slate-300 mb-3 flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-amber-400" />
+                维护工单列表
+              </h4>
+              {allWorkOrders.length === 0 ? (
+                <div className="text-center py-6 text-slate-500">
+                  <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-600" />
+                  <p className="text-sm">暂无维护工单</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {allWorkOrders.map((wo) => {
+                    const status = workOrderStatusConfig[wo.status];
+                    const StatusIcon = status.icon;
+                    const nextStatus = wo.status === 'pending' ? 'in_progress' : wo.status === 'in_progress' ? 'completed' : null;
+
+                    return (
+                      <div
+                        key={wo.id}
+                        className={`${status.bg} border border-slate-700 rounded-xl p-4 transition-all`}
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center">
+                              <Wrench className={`w-5 h-5 ${status.color}`} />
+                            </div>
+                            <div>
+                              <h4 className="text-white font-medium text-sm">{wo.furnaceName}</h4>
+                              <div className="flex items-center gap-1 text-xs text-slate-400">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded ${
+                                    wo.priority === 'high'
+                                      ? 'bg-red-900/50 text-red-400'
+                                      : wo.priority === 'medium'
+                                        ? 'bg-amber-900/50 text-amber-400'
+                                        : 'bg-blue-900/50 text-blue-400'
+                                  }`}
+                                >
+                                  {wo.priority === 'high' ? '高优' : wo.priority === 'medium' ? '中优' : '低优'}
+                                </span>
+                                <span>
+                                  {wo.type === 'routine' ? '常规保养' : wo.type === 'temperature' ? '温度异常' : '维修'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className={`flex items-center gap-1 ${status.color} text-xs px-2 py-1 rounded-full bg-slate-900/50`}>
+                            <StatusIcon className="w-3 h-3" />
+                            {status.label}
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-300 mb-3 bg-slate-900/50 rounded-lg p-2.5">
+                          {wo.description}
+                        </p>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-3 text-slate-400">
+                            {wo.assignedTo && (
+                              <span className="flex items-center gap-1">
+                                <User className="w-3 h-3" />
+                                {wo.assignedTo}
+                              </span>
+                            )}
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {wo.createdAt.toLocaleString('zh-CN', {
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </div>
+                          {nextStatus && (
+                            <button
+                              onClick={() => updateWorkOrderStatus(wo.furnaceId, wo.id, nextStatus)}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs rounded-md transition-all shadow-lg shadow-amber-900/20"
+                            >
+                              {status.btn}
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="w-96 border-l border-slate-700 bg-slate-900/50 overflow-y-auto p-4 space-y-3">
@@ -129,8 +249,34 @@ export default function Cremation() {
                       )}
                     </div>
 
+                    {f.workOrders.length > 0 && (
+                      <div className="pt-2 border-t border-slate-700">
+                        <p className="text-xs text-slate-400 mb-2 flex items-center gap-1">
+                          <Wrench className="w-3 h-3" />
+                          工单 ({f.workOrders.filter((wo) => wo.status !== 'completed').length} 待处理)
+                        </p>
+                        <div className="space-y-1.5">
+                          {f.workOrders.slice(0, 2).map((wo) => (
+                            <div
+                              key={wo.id}
+                              className="flex items-center justify-between text-xs px-2 py-1.5 bg-slate-800/50 rounded"
+                            >
+                              <span className="text-slate-300 truncate">{wo.description.slice(0, 20)}...</span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-xs ${
+                                  workOrderStatusConfig[wo.status].bg
+                                } ${workOrderStatusConfig[wo.status].color}`}
+                              >
+                                {workOrderStatusConfig[wo.status].label}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {f.currentFamily && (
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-700">
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-700">
                         <span className="text-slate-400 text-xs flex items-center gap-1">
                           <Activity className="w-3 h-3" />
                           服务家属

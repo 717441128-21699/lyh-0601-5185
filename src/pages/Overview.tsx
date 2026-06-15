@@ -1,6 +1,7 @@
 import Scene3D from '../components/3d/Scene3D';
 import DataPanel from '../components/layout/DataPanel';
 import { useAppStore } from '../store/useAppStore';
+import { useEffect } from 'react';
 import {
   Users,
   Flame,
@@ -16,12 +17,34 @@ export default function Overview() {
   const slots = useAppStore((s) => s.slots);
   const vehicles = useAppStore((s) => s.vehicles);
   const dailyStats = useAppStore((s) => s.dailyStats);
+  const appointments = useAppStore((s) => s.appointments);
+  const updateProgress = useAppStore((s) => s.updateProgress);
+  const updateTemperatures = useAppStore((s) => s.updateTemperatures);
+  const escalateOverdueSchedules = useAppStore((s) => s.escalateOverdueSchedules);
+  const getHallUsageRate = useAppStore((s) => s.getHallUsageRate);
+  const getFurnaceUsageRate = useAppStore((s) => s.getFurnaceUsageRate);
+  const getSlotUsageRate = useAppStore((s) => s.getSlotUsageRate);
+
+  useEffect(() => {
+    const t1 = setInterval(updateProgress, 1000);
+    const t2 = setInterval(updateTemperatures, 2000);
+    const t3 = setInterval(escalateOverdueSchedules, 5000);
+    return () => {
+      clearInterval(t1);
+      clearInterval(t2);
+      clearInterval(t3);
+    };
+  }, [updateProgress, updateTemperatures, escalateOverdueSchedules]);
 
   const todayStat = dailyStats[dailyStats.length - 1];
-  const activeHalls = halls.filter((h) => h.status === 'in_use').length;
+  const activeHalls = appointments.filter((a) => a.status === 'in_progress').length;
   const runningFurnaces = furnaces.filter((f) => f.status === 'running' || f.status === 'warning').length;
-  const occupiedSlots = slots.filter((s) => s.status === 'occupied' || s.status === 'expiring').length;
+  const occupiedSlots = slots.filter((s) => s.status === 'occupied' || s.status === 'expiring' || s.status === 'expired' || s.status === 'locked').length;
   const activeVehicles = vehicles.filter((v) => v.status === '出车中').length;
+
+  const hallUsage = getHallUsageRate();
+  const furnaceUsage = getFurnaceUsageRate();
+  const slotUsage = getSlotUsageRate();
 
   const statCards = [
     {
@@ -29,21 +52,21 @@ export default function Overview() {
       value: `${activeHalls}/${halls.length}`,
       icon: Users,
       color: 'from-blue-600 to-blue-800',
-      subtext: '使用率 50%',
+      subtext: `使用率 ${hallUsage.toFixed(1)}%`,
     },
     {
       label: '火化炉运行',
       value: `${runningFurnaces}/${furnaces.length}`,
       icon: Flame,
       color: 'from-orange-600 to-orange-800',
-      subtext: `今日火化 ${todayStat?.cremationCount || 0} 具`,
+      subtext: `今日火化 ${todayStat?.cremationCount || 0} 具 · 使用率 ${furnaceUsage.toFixed(1)}%`,
     },
     {
       label: '格口已占用',
       value: `${occupiedSlots}/${slots.length}`,
       icon: Archive,
       color: 'from-amber-600 to-amber-800',
-      subtext: `占用率 ${((occupiedSlots / slots.length) * 100).toFixed(1)}%`,
+      subtext: `占用率 ${slotUsage.toFixed(1)}%`,
     },
     {
       label: '车辆出车中',
@@ -86,7 +109,7 @@ export default function Overview() {
           <div className="absolute top-4 left-4 z-10 bg-slate-900/90 backdrop-blur-sm rounded-lg px-4 py-2 border border-slate-700">
             <p className="text-amber-400 text-sm font-medium flex items-center gap-2">
               <Clock className="w-4 h-4" />
-              全景总览模式
+              全景总览模式 · 数据实时刷新
             </p>
           </div>
           <Scene3D view="overview" />
