@@ -10,6 +10,7 @@ import type {
   DailyStats,
   AlertItem,
   NewAppointmentRequest,
+  UpdateAppointmentRequest,
   AllocationResult,
   MaintenanceWorkOrder,
   StaffRole,
@@ -135,6 +136,7 @@ interface AppState {
   resolveAlert: (id: string) => void;
   unlockSlot: (id: string) => void;
   createAppointment: (req: NewAppointmentRequest) => AllocationResult;
+  updateAppointment: (req: UpdateAppointmentRequest) => AllocationResult;
   updateWorkOrderStatus: (furnaceId: string, workOrderId: string, status: 'pending' | 'in_progress' | 'completed') => void;
   escalateOverdueSchedules: () => void;
   clearAllocationResult: () => void;
@@ -159,9 +161,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   getHallUsageRate: () => {
     const state = get();
     const active = state.appointments.filter(
-      (a) => a.status === 'in_progress' || a.status === 'scheduled',
+      (a) => a.status === 'in_progress',
     ).length;
-    return state.halls.length > 0 ? (active / state.halls.length) * 100 : 0;
+    return state.halls.length > 0 ? Math.min(100, (active / state.halls.length) * 100) : 0;
   },
 
   getFurnaceUsageRate: () => {
@@ -436,10 +438,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (req.needsVehicle) {
       const vehicle = findAvailableVehicle(state.vehicles, newSchedules, req.startTime, endTime);
-      if (vehicle) {
+      const driver = findAvailableStaff(state.staff, newSchedules, '灵车司机', req.startTime, endTime);
+      if (vehicle && driver) {
         const sch: ServiceSchedule = {
           id: generateId('sch'),
           vehicleId: vehicle.id,
+          staffId: driver.id,
           type: '车辆调度',
           startTime: new Date(req.startTime.getTime() - 30 * 60000),
           endTime: new Date(endTime.getTime() + 30 * 60000),
@@ -452,15 +456,28 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
         newSchedules.push(sch);
       } else {
-        scheduleAlerts.push({
-          id: generateId('alert'),
-          type: 'warning',
-          message: `${req.familyName} 预约灵车，但当前时段无可用车辆`,
-          time: new Date(),
-          resolved: false,
-          source: 'services',
-          relatedId: newAppointment.id,
-        });
+        if (!vehicle) {
+          scheduleAlerts.push({
+            id: generateId('alert'),
+            type: 'warning',
+            message: `${req.familyName} 预约灵车，但当前时段无可用车辆`,
+            time: new Date(),
+            resolved: false,
+            source: 'services',
+            relatedId: newAppointment.id,
+          });
+        }
+        if (!driver) {
+          scheduleAlerts.push({
+            id: generateId('alert'),
+            type: 'warning',
+            message: `${req.familyName} 预约灵车，但当前时段无可用灵车司机`,
+            time: new Date(),
+            resolved: false,
+            source: 'services',
+            relatedId: newAppointment.id,
+          });
+        }
       }
     }
 
@@ -478,6 +495,262 @@ export const useAppStore = create<AppState>((set, get) => ({
       appointments: [...adjustedAppointments, newAppointment],
       schedules: newSchedules,
       alerts: [...state.alerts, ...scheduleAlerts],
+      lastAllocationResult: result,
+    }));
+
+    return result;
+  },
+
+  updateAppointment: (req: UpdateAppointmentRequest) => {
+    const state = get();
+    const oldAppt = state.appointments.find((a) => a.id === req.appointmentId);
+
+    if (!oldAppt) {
+      const result: AllocationResult = {
+        status: 'no_available',
+        conflicts: [],
+        message: '预约记录不存在',
+      };
+      set({ lastAllocationResult: result });
+      return result;
+    }
+
+    const oldSpec = state.halls.find((h) => h.id === oldAppt.hallId)?.spec || '标准';
+    const oldDuration = Math.round((oldAppt.endTime.getTime() - oldAppt.startTime.getTime()) / 60000);
+
+    const newStartTime = req.startTime || oldAppt.startTime;
+    const newDuration = req.durationMinutes || oldDuration;
+    const newEndTime = new Date(newStartTime.getTime() + newDuration * 60000);
+    const newSpec = req.spec || oldSpec;
+    const newPriority = req.priority !== undefined ? req.priority : oldAppt.priority;
+    const newAttendees = req.attendees !== undefined ? req.attendees : oldAppt.attendees;
+
+    const appointmentsWithoutOld = state.appointments.filter((a) => a.id !== oldAppt.id);
+    const schedulesWithoutOld = state.schedules.filter((s) => s.appointmentId !== oldAppt.id);
+
+    const conflicts: AllocationResult['conflicts'] = [];
+    let adjustedAppointments: Appointment[] = [...appointmentsWithoutOld];
+
+    let targetHall = findAvailableHall(state.halls, adjustedAppointments, newSpec, newStartTime, newEndTime);
+
+    if (!targetHall) {
+      const sameSpecHalls = state.halls.filter((h) => h.spec === newSpec && h.status !== 'maintenance');
+      let bestHall: FarewellHall | null = null;
+      let bestAdjustments: Appointment[] = [];
+
+      for (const hall of sameSpecHalls) {
+        const hallConflicts = findConflictingAppointments(
+          adjustedAppointments,
+          hall.id,
+          newStartTime,
+          newEndTime,
+        );
+
+        const lowerPriorityConflicts = hallConflicts.filter((c) => c.priority > newPriority);
+        const allAdjustable = lowerPriorityConflicts.length === hallConflicts.length;
+
+        if (allAdjustable && lowerPriorityConflicts.length > 0) {
+          const tempAdjusted = [...adjustedAppointments];
+          let canAdjustAll = true;
+          const adjustments: AllocationResult['conflicts'] = [];
+
+          for (const conflict of lowerPriorityConflicts) {
+            const conflictHallSpec = state.halls.find(h => h.id === conflict.hallId)?.spec || '标准';
+            const newHall = findAvailableHall(
+              state.halls,
+              tempAdjusted.filter((a) => a.id !== conflict.id),
+              conflictHallSpec,
+              conflict.startTime,
+              conflict.endTime,
+              conflict.hallId,
+            );
+
+            if (newHall) {
+              const idx = tempAdjusted.findIndex((a) => a.id === conflict.id);
+              if (idx !== -1) {
+                tempAdjusted[idx] = { ...tempAdjusted[idx], hallId: newHall.id };
+              }
+              adjustments.push({
+                appointmentId: conflict.id,
+                familyName: conflict.familyName,
+                oldHallId: conflict.hallId,
+                oldHallName: state.halls.find((h) => h.id === conflict.hallId)?.name || '未知',
+                newHallId: newHall.id,
+                newHallName: newHall.name,
+                adjusted: true,
+              });
+            } else {
+              canAdjustAll = false;
+              break;
+            }
+          }
+
+          if (canAdjustAll) {
+            bestHall = hall;
+            bestAdjustments = tempAdjusted;
+            conflicts.push(...adjustments);
+            break;
+          }
+        }
+      }
+
+      if (!bestHall) {
+        const result: AllocationResult = {
+          status: 'no_available',
+          conflicts: [],
+          message: `无法找到${newSpec}规格的可用告别厅，请调整时间或规格`,
+        };
+        set({ lastAllocationResult: result });
+        return result;
+      }
+
+      targetHall = bestHall;
+      adjustedAppointments = bestAdjustments;
+    }
+
+    const updatedAppointment: Appointment = {
+      ...oldAppt,
+      hallId: targetHall.id,
+      startTime: newStartTime,
+      endTime: newEndTime,
+      priority: newPriority,
+      attendees: newAttendees,
+    };
+
+    const newSchedules: ServiceSchedule[] = [...schedulesWithoutOld];
+    const scheduleAlerts: AlertItem[] = [];
+
+    if (oldAppt.needsEmcee) {
+      const emcee = findAvailableStaff(state.staff, newSchedules, '司仪', newStartTime, newEndTime);
+      if (emcee) {
+        newSchedules.push({
+          id: generateId('sch'),
+          staffId: emcee.id,
+          type: '司仪',
+          startTime: newStartTime,
+          endTime: newEndTime,
+          status: 'pending',
+          confirmed: false,
+          familyName: oldAppt.familyName,
+          escalated: false,
+          confirmDeadline: new Date(newStartTime.getTime() - 30 * 60000),
+          appointmentId: oldAppt.id,
+        });
+      } else {
+        scheduleAlerts.push({
+          id: generateId('alert'),
+          type: 'warning',
+          message: `${oldAppt.familyName} 调整预约后，无可用司仪资源`,
+          time: new Date(),
+          resolved: false,
+          source: 'services',
+          relatedId: oldAppt.id,
+        });
+      }
+    }
+
+    if (oldAppt.needsBand) {
+      const band = findAvailableStaff(state.staff, newSchedules, '乐队', newStartTime, newEndTime);
+      if (band) {
+        newSchedules.push({
+          id: generateId('sch'),
+          staffId: band.id,
+          type: '乐队',
+          startTime: newStartTime,
+          endTime: newEndTime,
+          status: 'pending',
+          confirmed: false,
+          familyName: oldAppt.familyName,
+          escalated: false,
+          confirmDeadline: new Date(newStartTime.getTime() - 30 * 60000),
+          appointmentId: oldAppt.id,
+        });
+      } else {
+        scheduleAlerts.push({
+          id: generateId('alert'),
+          type: 'warning',
+          message: `${oldAppt.familyName} 调整预约后，无可用乐队资源`,
+          time: new Date(),
+          resolved: false,
+          source: 'services',
+          relatedId: oldAppt.id,
+        });
+      }
+    }
+
+    if (oldAppt.needsVehicle) {
+      const vehicle = findAvailableVehicle(state.vehicles, newSchedules, newStartTime, newEndTime);
+      if (vehicle) {
+        const driver = findAvailableStaff(state.staff, newSchedules, '灵车司机', newStartTime, newEndTime);
+        if (driver) {
+          newSchedules.push({
+            id: generateId('sch'),
+            vehicleId: vehicle.id,
+            staffId: driver.id,
+            type: '车辆调度',
+            startTime: new Date(newStartTime.getTime() - 30 * 60000),
+            endTime: new Date(newEndTime.getTime() + 30 * 60000),
+            status: 'pending',
+            confirmed: false,
+            familyName: oldAppt.familyName,
+            escalated: false,
+            confirmDeadline: new Date(newStartTime.getTime() - 60 * 60000),
+            appointmentId: oldAppt.id,
+          });
+        } else {
+          scheduleAlerts.push({
+            id: generateId('alert'),
+            type: 'warning',
+            message: `${oldAppt.familyName} 调整预约后，无可用灵车司机`,
+            time: new Date(),
+            resolved: false,
+            source: 'services',
+            relatedId: oldAppt.id,
+          });
+        }
+      } else {
+        scheduleAlerts.push({
+          id: generateId('alert'),
+          type: 'warning',
+          message: `${oldAppt.familyName} 调整预约后，无可用车辆`,
+          time: new Date(),
+          resolved: false,
+          source: 'services',
+          relatedId: oldAppt.id,
+        });
+      }
+    }
+
+    const hallChanged = oldAppt.hallId !== targetHall.id;
+    const result: AllocationResult = {
+      status: conflicts.length > 0 || hallChanged ? 'conflict' : 'success',
+      assignedHallId: targetHall.id,
+      assignedHallName: targetHall.name,
+      conflicts: hallChanged && !conflicts.find(c => c.appointmentId === oldAppt.id)
+        ? [
+            {
+              appointmentId: oldAppt.id,
+              familyName: oldAppt.familyName,
+              oldHallId: oldAppt.hallId,
+              oldHallName: state.halls.find((h) => h.id === oldAppt.hallId)?.name || '未知',
+              newHallId: targetHall.id,
+              newHallName: targetHall.name,
+              adjusted: true,
+            },
+            ...conflicts,
+          ]
+        : conflicts,
+      message: conflicts.length > 0
+        ? `已重新分配到 ${targetHall.name}，有 ${conflicts.length} 个预约被调整`
+        : hallChanged
+          ? `已调整至 ${targetHall.name}`
+          : `预约信息已更新`,
+    };
+
+    set((s) => ({
+      appointments: [...adjustedAppointments, updatedAppointment],
+      schedules: newSchedules,
+      alerts: [...s.alerts, ...scheduleAlerts],
       lastAllocationResult: result,
     }));
 

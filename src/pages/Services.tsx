@@ -1,5 +1,5 @@
 import { useAppStore } from '../store/useAppStore';
-import { useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   Users2,
   Mic,
@@ -19,7 +19,25 @@ export default function Services() {
   const vehicles = useAppStore((s) => s.vehicles);
   const schedules = useAppStore((s) => s.schedules);
   const confirmSchedule = useAppStore((s) => s.confirmSchedule);
-  const currentTime = useAppStore((s) => s.currentTime);
+  const updateProgress = useAppStore((s) => s.updateProgress);
+  const escalateOverdueSchedules = useAppStore((s) => s.escalateOverdueSchedules);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const t1 = setInterval(() => {
+      updateProgress();
+      setTick((t) => t + 1);
+    }, 1000);
+    const t2 = setInterval(() => {
+      escalateOverdueSchedules();
+    }, 5000);
+    return () => {
+      clearInterval(t1);
+      clearInterval(t2);
+    };
+  }, [updateProgress, escalateOverdueSchedules]);
+
+  const currentTime = new Date();
 
   const roleIcons: Record<string, any> = {
     '司仪': Mic,
@@ -162,19 +180,39 @@ export default function Services() {
 
                       <div className="flex items-center gap-3">
                         {staffMember && (
-                          <div className="text-right">
+                          <div className="text-right border border-slate-600/50 rounded-lg px-3 py-1.5 bg-slate-900/40">
+                            <div className="text-xs text-slate-400 mb-0.5">{sch.type === '车辆调度' ? '司机' : '人员'}</div>
                             <div className="text-sm text-white font-medium">{staffMember.name}</div>
-                            <div className={`text-xs ${staffStatusColor[staffMember.status as keyof typeof staffStatusColor]}`}>
-                              {staffMember.status}
+                            <div className={`text-xs ${
+                              !sch.confirmed ? 'text-amber-400' : staffStatusColor[staffMember.status as keyof typeof staffStatusColor]
+                            }`}>
+                              {!sch.confirmed ? '已占用(待确认)' : staffMember.status}
                             </div>
                           </div>
                         )}
                         {vehicle && (
-                          <div className="text-right">
+                          <div className="text-right border border-slate-600/50 rounded-lg px-3 py-1.5 bg-slate-900/40">
+                            <div className="text-xs text-slate-400 mb-0.5">车辆</div>
                             <div className="text-sm text-white font-mono font-medium">{vehicle.plateNumber}</div>
-                            <div className={`text-xs ${vehicleStatusColor[vehicle.status as keyof typeof vehicleStatusColor]}`}>
-                              {vehicle.status}
+                            <div className={`text-xs ${
+                              !sch.confirmed ? 'text-amber-400' : vehicleStatusColor[vehicle.status as keyof typeof vehicleStatusColor]
+                            }`}>
+                              {!sch.confirmed ? '已占用(待确认)' : vehicle.status}
                             </div>
+                          </div>
+                        )}
+                        {sch.type === '车辆调度' && !staffMember && (
+                          <div className="text-right border border-red-700/50 rounded-lg px-3 py-1.5 bg-red-900/20">
+                            <div className="text-xs text-slate-400 mb-0.5">司机</div>
+                            <div className="text-sm text-red-400 font-medium">未分配</div>
+                            <div className="text-xs text-red-500">⚠ 缺司机</div>
+                          </div>
+                        )}
+                        {sch.type === '车辆调度' && !vehicle && (
+                          <div className="text-right border border-red-700/50 rounded-lg px-3 py-1.5 bg-red-900/20">
+                            <div className="text-xs text-slate-400 mb-0.5">车辆</div>
+                            <div className="text-sm text-red-400 font-mono font-medium">未分配</div>
+                            <div className="text-xs text-red-500">⚠ 缺车辆</div>
                           </div>
                         )}
                         {!sch.confirmed && !sch.escalated && (

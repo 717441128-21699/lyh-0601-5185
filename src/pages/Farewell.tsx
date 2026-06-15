@@ -1,7 +1,7 @@
 import Scene3D from '../components/3d/Scene3D';
 import { useAppStore } from '../store/useAppStore';
 import { useState, useMemo } from 'react';
-import type { NewAppointmentRequest } from '../types';
+import type { NewAppointmentRequest, UpdateAppointmentRequest, Appointment } from '../types';
 import {
   DoorOpen,
   Users,
@@ -21,16 +21,19 @@ import {
   Music,
   Car,
   X,
+  Pencil,
 } from 'lucide-react';
 
 export default function Farewell() {
   const halls = useAppStore((s) => s.halls);
   const appointments = useAppStore((s) => s.appointments);
   const createAppointment = useAppStore((s) => s.createAppointment);
+  const updateAppointment = useAppStore((s) => s.updateAppointment);
   const lastAllocationResult = useAppStore((s) => s.lastAllocationResult);
   const clearAllocationResult = useAppStore((s) => s.clearAllocationResult);
 
   const [showForm, setShowForm] = useState(false);
+  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   const [formData, setFormData] = useState<{
     familyName: string;
     date: string;
@@ -73,22 +76,7 @@ export default function Farewell() {
     [appointments],
   );
 
-  const handleSubmit = () => {
-    if (!formData.familyName.trim()) return;
-    const startDateTime = new Date(`${formData.date}T${formData.time}:00`);
-    const request: NewAppointmentRequest = {
-      familyName: formData.familyName,
-      startTime: startDateTime,
-      durationMinutes: formData.durationMinutes,
-      spec: formData.spec,
-      priority: formData.priority,
-      attendees: formData.attendees,
-      needsEmcee: formData.needsEmcee,
-      needsBand: formData.needsBand,
-      needsVehicle: formData.needsVehicle,
-    };
-    createAppointment(request);
-    setShowForm(false);
+  const resetForm = () => {
     setFormData({
       familyName: '',
       date: new Date().toISOString().slice(0, 10),
@@ -101,6 +89,58 @@ export default function Farewell() {
       needsBand: false,
       needsVehicle: false,
     });
+    setEditingAppointment(null);
+  };
+
+  const handleSubmit = () => {
+    if (!formData.familyName.trim()) return;
+    const startDateTime = new Date(`${formData.date}T${formData.time}:00`);
+
+    if (editingAppointment) {
+      const request: UpdateAppointmentRequest = {
+        appointmentId: editingAppointment.id,
+        startTime: startDateTime,
+        durationMinutes: formData.durationMinutes,
+        spec: formData.spec,
+        priority: formData.priority,
+        attendees: formData.attendees,
+      };
+      updateAppointment(request);
+    } else {
+      const request: NewAppointmentRequest = {
+        familyName: formData.familyName,
+        startTime: startDateTime,
+        durationMinutes: formData.durationMinutes,
+        spec: formData.spec,
+        priority: formData.priority,
+        attendees: formData.attendees,
+        needsEmcee: formData.needsEmcee,
+        needsBand: formData.needsBand,
+        needsVehicle: formData.needsVehicle,
+      };
+      createAppointment(request);
+    }
+    setShowForm(false);
+    resetForm();
+  };
+
+  const openEditForm = (apt: Appointment) => {
+    const hall = halls.find(h => h.id === apt.hallId);
+    const duration = Math.round((apt.endTime.getTime() - apt.startTime.getTime()) / 60000);
+    setEditingAppointment(apt);
+    setFormData({
+      familyName: apt.familyName,
+      date: apt.startTime.toISOString().slice(0, 10),
+      time: apt.startTime.toTimeString().slice(0, 5),
+      durationMinutes: duration,
+      spec: (hall?.spec || '标准') as '标准' | '豪华' | 'VIP',
+      priority: apt.priority,
+      attendees: apt.attendees,
+      needsEmcee: apt.needsEmcee || false,
+      needsBand: apt.needsBand || false,
+      needsVehicle: apt.needsVehicle || false,
+    });
+    setShowForm(true);
   };
 
   return (
@@ -223,6 +263,7 @@ export default function Farewell() {
                       <th className="text-left py-2 px-2">结束时间</th>
                       <th className="text-left py-2 px-2">状态</th>
                       <th className="text-left py-2 px-2">服务</th>
+                      <th className="text-left py-2 px-2">操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -256,6 +297,16 @@ export default function Farewell() {
                             {apt.needsBand && <Music className="w-3.5 h-3.5 text-purple-400" aria-label="乐队" />}
                             {apt.needsVehicle && <Car className="w-3.5 h-3.5 text-emerald-400" aria-label="灵车" />}
                           </div>
+                        </td>
+                        <td className="py-2 px-2">
+                          <button
+                            onClick={() => openEditForm(apt)}
+                            className="flex items-center gap-1 px-2 py-1 bg-slate-700/50 hover:bg-amber-600/30 text-slate-300 hover:text-amber-300 rounded text-xs transition-colors"
+                            title="编辑预约（调整时间、规格、优先级后自动重新分配厅室）"
+                          >
+                            <Pencil className="w-3 h-3" />
+                            编辑
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -358,10 +409,13 @@ export default function Farewell() {
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-white flex items-center gap-2" style={{ fontFamily: 'Noto Serif SC, serif' }}>
                 <CalendarDays className="w-5 h-5 text-amber-400" />
-                新增告别仪式预约
+                {editingAppointment ? '调整告别仪式预约' : '新增告别仪式预约'}
               </h3>
               <button
-                onClick={() => setShowForm(false)}
+                onClick={() => {
+                  setShowForm(false);
+                  resetForm();
+                }}
                 className="text-slate-400 hover:text-white p-1"
               >
                 <X className="w-5 h-5" />
@@ -376,8 +430,16 @@ export default function Farewell() {
                   value={formData.familyName}
                   onChange={(e) => setFormData({ ...formData, familyName: e.target.value })}
                   placeholder="如：李氏家属"
-                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
+                  readOnly={!!editingAppointment}
+                  className={`w-full border rounded-lg px-4 py-2.5 focus:outline-none focus:border-amber-500 transition-colors ${
+                    editingAppointment
+                      ? 'bg-slate-900 border-slate-700 text-slate-400 cursor-not-allowed'
+                      : 'bg-slate-800 border-slate-600 text-white placeholder-slate-500'
+                  }`}
                 />
+                {editingAppointment && (
+                  <p className="text-xs text-slate-500 mt-1">家属姓名不可修改</p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -458,37 +520,49 @@ export default function Farewell() {
               <div>
                 <label className="block text-sm text-slate-300 mb-2">附加服务</label>
                 <div className="flex gap-3">
-                  <label className="flex items-center gap-2 px-4 py-2 bg-slate-800 rounded-lg cursor-pointer hover:bg-slate-700 transition-colors">
+                  <label className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                    editingAppointment ? 'bg-slate-900 cursor-not-allowed opacity-60' : 'bg-slate-800 cursor-pointer hover:bg-slate-700'
+                  }`}>
                     <input
                       type="checkbox"
                       checked={formData.needsEmcee}
-                      onChange={(e) => setFormData({ ...formData, needsEmcee: e.target.checked })}
-                      className="rounded text-amber-500 focus:ring-amber-500 bg-slate-700 border-slate-600"
+                      onChange={(e) => !editingAppointment && setFormData({ ...formData, needsEmcee: e.target.checked })}
+                      disabled={!!editingAppointment}
+                      className="rounded text-amber-500 focus:ring-amber-500 bg-slate-700 border-slate-600 disabled:cursor-not-allowed"
                     />
                     <Mic className="w-4 h-4 text-blue-400" />
                     <span className="text-sm text-slate-300">司仪</span>
                   </label>
-                  <label className="flex items-center gap-2 px-4 py-2 bg-slate-800 rounded-lg cursor-pointer hover:bg-slate-700 transition-colors">
+                  <label className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                    editingAppointment ? 'bg-slate-900 cursor-not-allowed opacity-60' : 'bg-slate-800 cursor-pointer hover:bg-slate-700'
+                  }`}>
                     <input
                       type="checkbox"
                       checked={formData.needsBand}
-                      onChange={(e) => setFormData({ ...formData, needsBand: e.target.checked })}
-                      className="rounded text-amber-500 focus:ring-amber-500 bg-slate-700 border-slate-600"
+                      onChange={(e) => !editingAppointment && setFormData({ ...formData, needsBand: e.target.checked })}
+                      disabled={!!editingAppointment}
+                      className="rounded text-amber-500 focus:ring-amber-500 bg-slate-700 border-slate-600 disabled:cursor-not-allowed"
                     />
                     <Music className="w-4 h-4 text-purple-400" />
                     <span className="text-sm text-slate-300">乐队</span>
                   </label>
-                  <label className="flex items-center gap-2 px-4 py-2 bg-slate-800 rounded-lg cursor-pointer hover:bg-slate-700 transition-colors">
+                  <label className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                    editingAppointment ? 'bg-slate-900 cursor-not-allowed opacity-60' : 'bg-slate-800 cursor-pointer hover:bg-slate-700'
+                  }`}>
                     <input
                       type="checkbox"
                       checked={formData.needsVehicle}
-                      onChange={(e) => setFormData({ ...formData, needsVehicle: e.target.checked })}
-                      className="rounded text-amber-500 focus:ring-amber-500 bg-slate-700 border-slate-600"
+                      onChange={(e) => !editingAppointment && setFormData({ ...formData, needsVehicle: e.target.checked })}
+                      disabled={!!editingAppointment}
+                      className="rounded text-amber-500 focus:ring-amber-500 bg-slate-700 border-slate-600 disabled:cursor-not-allowed"
                     />
                     <Car className="w-4 h-4 text-emerald-400" />
                     <span className="text-sm text-slate-300">灵车</span>
                   </label>
                 </div>
+                {editingAppointment && (
+                  <p className="text-xs text-slate-500 mt-1">附加服务在调整模式下不可修改</p>
+                )}
               </div>
             </div>
 
@@ -504,7 +578,7 @@ export default function Farewell() {
                 disabled={!formData.familyName.trim()}
                 className="flex-1 px-5 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all shadow-lg shadow-amber-900/30 font-medium"
               >
-                智能分配
+                {editingAppointment ? '重新分配厅室' : '智能分配'}
               </button>
             </div>
           </div>

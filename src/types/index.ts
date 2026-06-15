@@ -145,3 +145,12 @@ export interface NewAppointmentRequest {
   needsBand: boolean;
   needsVehicle: boolean;
 }
+
+export interface UpdateAppointmentRequest {
+  appointmentId: string;
+  startTime?: Date;
+  durationMinutes?: number;
+  spec?: '标准' | '豪华' | 'VIP';
+  priority?: number;
+  attendees?: number;
+}
