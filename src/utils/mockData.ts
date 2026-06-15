@@ -253,6 +253,7 @@ export const mockSchedules: ServiceSchedule[] = [
   {
     id: 'sch-3',
     vehicleId: 'veh-1',
+    staffId: 'staff-5',
     type: '车辆调度',
     startTime: new Date(now.getTime() + 60 * 60000),
     endTime: new Date(now.getTime() + 120 * 60000),
@@ -262,6 +263,19 @@ export const mockSchedules: ServiceSchedule[] = [
     escalated: false,
     confirmDeadline: new Date(now.getTime() + 15 * 60000),
     appointmentId: 'apt-3',
+  },
+  {
+    id: 'sch-5',
+    vehicleId: 'veh-2',
+    type: '车辆调度',
+    startTime: new Date(now.getTime() + 180 * 60000),
+    endTime: new Date(now.getTime() + 240 * 60000),
+    status: 'pending',
+    confirmed: false,
+    familyName: '孙氏家属',
+    escalated: false,
+    confirmDeadline: new Date(now.getTime() + 120 * 60000),
+    appointmentId: 'apt-5',
   },
   {
     id: 'sch-4',

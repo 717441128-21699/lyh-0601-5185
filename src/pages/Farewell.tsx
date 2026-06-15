@@ -1,6 +1,6 @@
 import Scene3D from '../components/3d/Scene3D';
 import { useAppStore } from '../store/useAppStore';
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { NewAppointmentRequest, UpdateAppointmentRequest, Appointment } from '../types';
 import {
   DoorOpen,
@@ -31,6 +31,27 @@ export default function Farewell() {
   const updateAppointment = useAppStore((s) => s.updateAppointment);
   const lastAllocationResult = useAppStore((s) => s.lastAllocationResult);
   const clearAllocationResult = useAppStore((s) => s.clearAllocationResult);
+  const updateProgress = useAppStore((s) => s.updateProgress);
+  const updateTemperatures = useAppStore((s) => s.updateTemperatures);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const t1 = setInterval(() => {
+      updateProgress();
+      setTick((t) => t + 1);
+    }, 1000);
+    const t2 = setInterval(() => {
+      updateTemperatures();
+    }, 2000);
+    return () => {
+      clearInterval(t1);
+      clearInterval(t2);
+    };
+  }, [updateProgress, updateTemperatures]);
+
+  const inUseCount = halls.filter((h) => h.status === 'in_use').length;
+  const reservedCount = halls.filter((h) => h.status === 'reserved').length;
+  const availableCount = halls.filter((h) => h.status === 'available').length;
 
   const [showForm, setShowForm] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
@@ -154,13 +175,27 @@ export default function Farewell() {
             </h2>
             <p className="text-slate-400 text-sm mt-1">按时间、规格、优先级自动分配，冲突时按遗体告别优先排序调整</p>
           </div>
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-lg transition-all shadow-lg shadow-amber-900/30 font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            新增预约
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-900/30 rounded-lg border border-blue-700">
+              <Users className="w-4 h-4 text-blue-400" />
+              <span className="text-blue-300 text-sm">使用中：{inUseCount}</span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 rounded-lg border border-amber-700">
+              <Clock className="w-4 h-4 text-amber-400" />
+              <span className="text-amber-300 text-sm">已预约：{reservedCount}</span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-900/30 rounded-lg border border-green-700">
+              <CheckCircle2 className="w-4 h-4 text-green-400" />
+              <span className="text-green-300 text-sm">空闲：{availableCount}</span>
+            </div>
+            <button
+              onClick={() => setShowForm(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-lg transition-all shadow-lg shadow-amber-900/30 font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              新增预约
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-1 overflow-hidden">

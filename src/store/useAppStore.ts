@@ -14,6 +14,7 @@ import type {
   AllocationResult,
   MaintenanceWorkOrder,
   StaffRole,
+  HallStatus,
 } from '../types';
 import {
   mockHalls,
@@ -132,7 +133,7 @@ interface AppState {
   lastAllocationResult: AllocationResult | null;
   updateProgress: () => void;
   updateTemperatures: () => void;
-  confirmSchedule: (id: string) => void;
+  confirmSchedule: (id: string) => { success: boolean; message: string };
   resolveAlert: (id: string) => void;
   unlockSlot: (id: string) => void;
   createAppointment: (req: NewAppointmentRequest) => AllocationResult;
@@ -143,6 +144,8 @@ interface AppState {
   getHallUsageRate: () => number;
   getFurnaceUsageRate: () => number;
   getSlotUsageRate: () => number;
+  repairIncompleteSchedules: () => void;
+  autoAssignMissingResources: (scheduleId: string) => { success: boolean; message: string };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -187,28 +190,86 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateProgress: () =>
     set((state) => {
       const now = new Date();
+
+      const updatedAppointments = state.appointments.map((a) => {
+        if (a.status === 'completed') return a;
+
+        const total = a.endTime.getTime() - a.startTime.getTime();
+        const elapsed = now.getTime() - a.startTime.getTime();
+        const progress = Math.min(100, Math.max(0, (elapsed / total) * 100));
+
+        let newStatus: Appointment['status'] = a.status;
+        if (a.status === 'scheduled' && now >= a.startTime) {
+          newStatus = 'in_progress';
+        } else if (a.status === 'in_progress') {
+          newStatus = progress >= 100 ? 'completed' : 'in_progress';
+        }
+
+        return { ...a, progress, status: newStatus };
+      });
+
+      const activeAppointmentIds = updatedAppointments
+        .filter((a) => a.status === 'in_progress')
+        .map((a) => a.hallId);
+
+      const updatedHalls = state.halls.map((h) => {
+        if (h.status === 'maintenance') return h;
+        const hasActive = activeAppointmentIds.includes(h.id);
+        const hasScheduled = updatedAppointments.some(
+          (a) => a.hallId === h.id && a.status === 'scheduled',
+        );
+        const newStatus: HallStatus = hasActive ? 'in_use' : hasScheduled ? 'reserved' : 'available';
+        return { ...h, status: newStatus };
+      });
+
+      const activeVehicleScheduleIds = state.schedules
+        .filter((s) => s.type === '车辆调度' && s.confirmed && s.status === 'confirmed')
+        .filter((s) => s.startTime <= now && s.endTime >= now)
+        .map((s) => s.vehicleId);
+
+      const activeStaffScheduleIds = state.schedules
+        .filter((s) => s.confirmed && s.status === 'confirmed')
+        .filter((s) => s.startTime <= now && s.endTime >= now)
+        .map((s) => s.staffId);
+
+      const updatedVehicles = state.vehicles.map((v) => {
+        if (v.status === '维护中') return v;
+        const isActive = activeVehicleScheduleIds.includes(v.id);
+        const newStatus: Vehicle['status'] = isActive ? '出车中' : '空闲';
+        return { ...v, status: newStatus };
+      });
+
+      const updatedStaff = state.staff.map((s) => {
+        if (s.status === '休息') return s;
+        const isActive = activeStaffScheduleIds.includes(s.id);
+        const isDriving = s.role === '灵车司机' && state.vehicles.some(
+          (v) => activeVehicleScheduleIds.includes(v.id) && state.schedules.some(
+            (sch) => sch.vehicleId === v.id && sch.staffId === s.id && sch.confirmed,
+          ),
+        );
+        const newStatus: ServiceStaff['status'] = isDriving ? '出车中' : isActive ? '服务中' : '空闲';
+        return { ...s, status: newStatus };
+      });
+
+      const movingVehicles = updatedVehicles.map((v) => {
+        if (v.status !== '出车中') return v;
+        const t = (now.getTime() % 10000) / 10000;
+        return {
+          ...v,
+          position: [
+            v.position[0] + Math.sin(t * Math.PI * 2) * 0.1,
+            v.position[1],
+            v.position[2] + Math.cos(t * Math.PI * 2) * 0.1,
+          ] as [number, number, number],
+        };
+      });
+
       return {
         currentTime: now,
-        appointments: state.appointments.map((a) => {
-          if (a.status !== 'in_progress') return a;
-          const total = a.endTime.getTime() - a.startTime.getTime();
-          const elapsed = now.getTime() - a.startTime.getTime();
-          const progress = Math.min(100, Math.max(0, (elapsed / total) * 100));
-          const newStatus = progress >= 100 ? 'completed' : a.status;
-          return { ...a, progress, status: newStatus };
-        }),
-        vehicles: state.vehicles.map((v) => {
-          if (v.status !== '出车中') return v;
-          const t = (now.getTime() % 10000) / 10000;
-          return {
-            ...v,
-            position: [
-              v.position[0] + Math.sin(t * Math.PI * 2) * 0.1,
-              v.position[1],
-              v.position[2] + Math.cos(t * Math.PI * 2) * 0.1,
-            ],
-          };
-        }),
+        appointments: updatedAppointments,
+        halls: updatedHalls,
+        vehicles: movingVehicles,
+        staff: updatedStaff,
       };
     }),
 
@@ -757,12 +818,61 @@ export const useAppStore = create<AppState>((set, get) => ({
     return result;
   },
 
-  confirmSchedule: (id: string) =>
-    set((state) => ({
-      schedules: state.schedules.map((s) =>
-        s.id === id ? { ...s, confirmed: true, status: 'confirmed', escalated: false } : s,
+  confirmSchedule: (id: string) => {
+    const state = get();
+    const schedule = state.schedules.find((s) => s.id === id);
+
+    if (!schedule) {
+      return { success: false, message: '排班记录不存在' };
+    }
+
+    if (schedule.type === '车辆调度') {
+      if (!schedule.staffId) {
+        return { success: false, message: '缺少司机资源，无法确认，请先补派司机' };
+      }
+      if (!schedule.vehicleId) {
+        return { success: false, message: '缺少车辆资源，无法确认，请先补派车辆' };
+      }
+    }
+
+    if (schedule.staffId && !state.staff.find((s) => s.id === schedule.staffId)) {
+      return { success: false, message: '关联的人员不存在，请重新分配' };
+    }
+    if (schedule.vehicleId && !state.vehicles.find((v) => v.id === schedule.vehicleId)) {
+      return { success: false, message: '关联的车辆不存在，请重新分配' };
+    }
+
+    const now = new Date();
+    const isActive = schedule.startTime <= now && schedule.endTime >= now;
+
+    set((s) => ({
+      schedules: s.schedules.map((sched) =>
+        sched.id === id
+          ? { ...sched, confirmed: true, status: 'confirmed', escalated: false }
+          : sched,
       ),
-    })),
+      staff: isActive && schedule.staffId
+        ? s.staff.map((st) =>
+            st.id === schedule.staffId
+              ? {
+                  ...st,
+                  status: schedule.type === '车辆调度' ? '出车中' : '服务中',
+                }
+              : st,
+          )
+        : s.staff,
+      vehicles: isActive && schedule.vehicleId
+        ? s.vehicles.map((v) =>
+            v.id === schedule.vehicleId ? { ...v, status: '出车中' } : v,
+          )
+        : s.vehicles,
+    }));
+
+    return {
+      success: true,
+      message: schedule.type === '车辆调度' ? '车辆和司机排班已确认，状态已同步更新' : '排班已确认',
+    };
+  },
 
   resolveAlert: (id: string) =>
     set((state) => ({
@@ -818,4 +928,129 @@ export const useAppStore = create<AppState>((set, get) => ({
         alerts: newAlerts.length > 0 ? [...state.alerts, ...newAlerts] : state.alerts,
       };
     }),
+
+  autoAssignMissingResources: (scheduleId: string) => {
+    const state = get();
+    const schedule = state.schedules.find((s) => s.id === scheduleId);
+
+    if (!schedule) {
+      return { success: false, message: '排班记录不存在' };
+    }
+
+    if (schedule.type !== '车辆调度') {
+      return { success: false, message: '该排班类型不需要补派资源' };
+    }
+
+    if (schedule.staffId && schedule.vehicleId) {
+      return { success: true, message: '资源已齐全，无需补派' };
+    }
+
+    const newSchedules = [...state.schedules];
+    const scheduleIdx = newSchedules.findIndex((s) => s.id === scheduleId);
+    const updates: Partial<ServiceSchedule> = {};
+    const messages: string[] = [];
+
+    if (!schedule.staffId) {
+      const driver = findAvailableStaff(
+        state.staff,
+        newSchedules.filter((s) => s.id !== scheduleId),
+        '灵车司机',
+        schedule.startTime,
+        schedule.endTime,
+      );
+      if (driver) {
+        updates.staffId = driver.id;
+        messages.push(`已自动补派司机：${driver.name}`);
+      } else {
+        return { success: false, message: '补派失败：当前时段无可用灵车司机' };
+      }
+    }
+
+    if (!schedule.vehicleId) {
+      const vehicle = findAvailableVehicle(
+        state.vehicles,
+        newSchedules.filter((s) => s.id !== scheduleId),
+        schedule.startTime,
+        schedule.endTime,
+      );
+      if (vehicle) {
+        updates.vehicleId = vehicle.id;
+        messages.push(`已自动补派车辆：${vehicle.plateNumber}`);
+      } else {
+        return { success: false, message: '补派失败：当前时段无可用车辆' };
+      }
+    }
+
+    newSchedules[scheduleIdx] = { ...schedule, ...updates };
+
+    set({
+      schedules: newSchedules,
+      alerts: [
+        ...state.alerts,
+        {
+          id: generateId('alert'),
+          type: 'info',
+          message: `${schedule.familyName} 灵车排班资源已补派完成：${messages.join('，')}`,
+          time: new Date(),
+          resolved: false,
+          source: 'services',
+          relatedId: scheduleId,
+        },
+      ],
+    });
+
+    return { success: true, message: messages.join('，') };
+  },
+
+  repairIncompleteSchedules: () => {
+    const state = get();
+    const newAlerts: AlertItem[] = [];
+    const updatedSchedules = [...state.schedules];
+    let repairedCount = 0;
+
+    for (let i = 0; i < updatedSchedules.length; i++) {
+      const s = updatedSchedules[i];
+      if (s.confirmed || s.status === 'completed') continue;
+
+      let isIncomplete = false;
+      const missing: string[] = [];
+
+      if (s.type === '车辆调度') {
+        if (!s.staffId) {
+          isIncomplete = true;
+          missing.push('司机');
+        }
+        if (!s.vehicleId) {
+          isIncomplete = true;
+          missing.push('车辆');
+        }
+      } else {
+        if (!s.staffId) {
+          isIncomplete = true;
+          missing.push('人员');
+        }
+      }
+
+      if (isIncomplete && !s.escalated) {
+        newAlerts.push({
+          id: generateId('alert'),
+          type: 'error',
+          message: `排班资源不完整：${s.familyName} 的${s.type}缺少${missing.join('、')}，请主管立即处理或点击自动补派`,
+          time: new Date(),
+          resolved: false,
+          source: 'services',
+          relatedId: s.id,
+        });
+        updatedSchedules[i] = { ...s, escalated: true, status: 'escalated' as const };
+        repairedCount++;
+      }
+    }
+
+    if (newAlerts.length > 0) {
+      set({
+        schedules: updatedSchedules,
+        alerts: [...state.alerts, ...newAlerts],
+      });
+    }
+  },
 }));

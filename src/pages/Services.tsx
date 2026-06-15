@@ -12,6 +12,8 @@ import {
   Phone,
   ChevronRight,
   Timer,
+  Wrench,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function Services() {
@@ -21,9 +23,13 @@ export default function Services() {
   const confirmSchedule = useAppStore((s) => s.confirmSchedule);
   const updateProgress = useAppStore((s) => s.updateProgress);
   const escalateOverdueSchedules = useAppStore((s) => s.escalateOverdueSchedules);
+  const autoAssignMissingResources = useAppStore((s) => s.autoAssignMissingResources);
+  const repairIncompleteSchedules = useAppStore((s) => s.repairIncompleteSchedules);
   const [tick, setTick] = useState(0);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
+    repairIncompleteSchedules();
     const t1 = setInterval(() => {
       updateProgress();
       setTick((t) => t + 1);
@@ -31,13 +37,39 @@ export default function Services() {
     const t2 = setInterval(() => {
       escalateOverdueSchedules();
     }, 5000);
+    const t3 = setInterval(() => {
+      repairIncompleteSchedules();
+    }, 10000);
     return () => {
       clearInterval(t1);
       clearInterval(t2);
+      clearInterval(t3);
     };
-  }, [updateProgress, escalateOverdueSchedules]);
+  }, [updateProgress, escalateOverdueSchedules, repairIncompleteSchedules]);
 
   const currentTime = new Date();
+
+  const showToast = (type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const isResourceComplete = (sch: any) => {
+    if (sch.type === '车辆调度') {
+      return !!sch.staffId && !!sch.vehicleId;
+    }
+    return !!sch.staffId;
+  };
+
+  const handleConfirm = (id: string) => {
+    const result = confirmSchedule(id);
+    showToast(result.success ? 'success' : 'error', result.message);
+  };
+
+  const handleAutoAssign = (id: string) => {
+    const result = autoAssignMissingResources(id);
+    showToast(result.success ? 'success' : 'error', result.message);
+  };
 
   const roleIcons: Record<string, any> = {
     '司仪': Mic,
@@ -106,6 +138,10 @@ export default function Services() {
           <div className="flex items-center gap-2 px-3 py-1.5 bg-red-900/30 rounded-lg border border-red-700">
             <AlertTriangle className="w-4 h-4 text-red-400" />
             <span className="text-red-300">已升级：{schedules.filter((s) => s.escalated).length}</span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-900/30 rounded-lg border border-purple-700">
+            <Wrench className="w-4 h-4 text-purple-400" />
+            <span className="text-purple-300">资源不齐：{schedules.filter((s) => !s.confirmed && s.status !== 'completed' && !isResourceComplete(s)).length}</span>
           </div>
         </div>
       </div>
@@ -215,23 +251,46 @@ export default function Services() {
                             <div className="text-xs text-red-500">⚠ 缺车辆</div>
                           </div>
                         )}
-                        {!sch.confirmed && !sch.escalated && (
-                          <button
-                            onClick={() => confirmSchedule(sch.id)}
-                            className="flex items-center gap-1 px-5 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-sm rounded-lg transition-all shadow-lg shadow-amber-900/30 font-medium"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            确认排班
-                          </button>
-                        )}
-                        {sch.escalated && !sch.confirmed && (
-                          <button
-                            onClick={() => confirmSchedule(sch.id)}
-                            className="flex items-center gap-1 px-5 py-2 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white text-sm rounded-lg transition-all shadow-lg shadow-red-900/30 font-medium"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            主管确认
-                          </button>
+                        {!sch.confirmed && (
+                          <div className="flex flex-col gap-1.5 items-end">
+                            {!isResourceComplete(sch) && sch.type === '车辆调度' && (
+                              <button
+                                onClick={() => handleAutoAssign(sch.id)}
+                                className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white text-xs rounded-lg transition-all shadow-lg shadow-blue-900/30 font-medium"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                自动补派
+                              </button>
+                            )}
+                            {!sch.escalated && (
+                              <button
+                                onClick={() => handleConfirm(sch.id)}
+                                disabled={!isResourceComplete(sch)}
+                                className={`flex items-center gap-1 px-5 py-2 text-white text-sm rounded-lg transition-all shadow-lg font-medium ${
+                                  isResourceComplete(sch)
+                                    ? 'bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 shadow-amber-900/30'
+                                    : 'bg-slate-600 cursor-not-allowed opacity-50'
+                                }`}
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                                {isResourceComplete(sch) ? '确认排班' : '资源不齐'}
+                              </button>
+                            )}
+                            {sch.escalated && (
+                              <button
+                                onClick={() => handleConfirm(sch.id)}
+                                disabled={!isResourceComplete(sch)}
+                                className={`flex items-center gap-1 px-5 py-2 text-white text-sm rounded-lg transition-all shadow-lg font-medium ${
+                                  isResourceComplete(sch)
+                                    ? 'bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 shadow-red-900/30'
+                                    : 'bg-slate-600 cursor-not-allowed opacity-50'
+                                }`}
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                                {isResourceComplete(sch) ? '主管确认' : '资源不齐'}
+                              </button>
+                            )}
+                          </div>
                         )}
                         {sch.confirmed && (
                           <div className="flex items-center gap-1 text-green-400 text-sm font-medium">
@@ -332,6 +391,19 @@ export default function Services() {
           </div>
         </div>
       </div>
+
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce ${
+          toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5" />
+          ) : (
+            <AlertTriangle className="w-5 h-5" />
+          )}
+          <span className="font-medium">{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 }
