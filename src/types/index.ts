@@ -124,16 +124,6 @@ export interface DailyStats {
   serviceCount: number;
 }
 
-export interface AlertItem {
-  id: string;
-  type: 'warning' | 'error' | 'info';
-  message: string;
-  time: Date;
-  resolved: boolean;
-  source?: string;
-  relatedId?: string;
-}
-
 export interface NewAppointmentRequest {
   familyName: string;
   startTime: Date;
@@ -153,4 +143,54 @@ export interface UpdateAppointmentRequest {
   spec?: '标准' | '豪华' | 'VIP';
   priority?: number;
   attendees?: number;
+  skipSchedules?: boolean;
+}
+
+export interface ResourceOption {
+  id: string;
+  name: string;
+  conflictReason?: string;
+}
+
+export interface ScheduleConflict {
+  scheduleId: string;
+  type: string;
+  currentStaffId?: string;
+  currentStaffName?: string;
+  currentVehicleId?: string;
+  currentVehiclePlate?: string;
+  availableStaffOptions?: ResourceOption[];
+  availableVehicleOptions?: ResourceOption[];
+}
+
+export interface AllocationResult {
+  status: AllocationStatus;
+  assignedHallId?: string;
+  assignedHallName?: string;
+  conflicts: Array<{
+    appointmentId: string;
+    familyName: string;
+    oldHallId: string;
+    oldHallName: string;
+    newHallId?: string;
+    newHallName?: string;
+    adjusted: boolean;
+  }>;
+  scheduleConflicts?: ScheduleConflict[];
+  message: string;
+}
+
+export interface AlertItem {
+  id: string;
+  type: 'warning' | 'error' | 'info';
+  message: string;
+  time: Date;
+  resolved: boolean;
+  source?: string;
+  relatedId?: string;
+  navigateTo?: {
+    page: 'overview' | 'farewell' | 'cremation' | 'services' | 'columbarium';
+    highlightId?: string;
+    highlightDate?: string;
+  };
 }

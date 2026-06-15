@@ -1,5 +1,6 @@
-import { AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Info, X, ExternalLink } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import { useNavigate, createSearchParams } from 'react-router-dom';
 
 export default function DataPanel() {
   const alerts = useAppStore((s) => s.alerts);
@@ -7,6 +8,31 @@ export default function DataPanel() {
   const getHallUsageRate = useAppStore((s) => s.getHallUsageRate);
   const getFurnaceUsageRate = useAppStore((s) => s.getFurnaceUsageRate);
   const getSlotUsageRate = useAppStore((s) => s.getSlotUsageRate);
+  const navigate = useNavigate();
+
+  const pagePaths: Record<string, string> = {
+    overview: '/',
+    farewell: '/farewell',
+    cremation: '/cremation',
+    services: '/services',
+    columbarium: '/columbarium',
+  };
+
+  const handleAlertClick = (alert: any) => {
+    if (!alert.navigateTo) return;
+
+    const params: Record<string, string> = {};
+    if (alert.navigateTo.highlightId) {
+      params.highlight = alert.navigateTo.highlightId;
+    }
+    if (alert.navigateTo.highlightDate) {
+      params.date = alert.navigateTo.highlightDate;
+    }
+
+    const path = pagePaths[alert.navigateTo.page] || '/';
+    const search = Object.keys(params).length > 0 ? `?${createSearchParams(params)}` : '';
+    navigate(`${path}${search}`);
+  };
 
   const unresolved = alerts.filter((a) => !a.resolved);
 
@@ -56,21 +82,32 @@ export default function DataPanel() {
         {unresolved.slice().reverse().map((alert) => {
           const style = typeStyles[alert.type];
           const Icon = style.icon;
+          const hasNavigation = !!alert.navigateTo;
           return (
             <div
               key={alert.id}
-              className={`${style.bg} border rounded-lg p-3 transition-all hover:scale-[1.01]`}
+              className={`${style.bg} border rounded-lg p-3 transition-all hover:scale-[1.01] ${hasNavigation ? 'cursor-pointer hover:border-opacity-80' : ''}`}
+              onClick={() => hasNavigation && handleAlertClick(alert)}
             >
               <div className="flex items-start gap-2">
                 <Icon className={`w-5 h-5 ${style.color} shrink-0 mt-0.5`} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-200 leading-relaxed">{alert.message}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm text-slate-200 leading-relaxed flex-1">{alert.message}</p>
+                    {hasNavigation && (
+                      <ExternalLink className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    )}
+                  </div>
                   <p className="text-xs text-slate-500 mt-1">
                     {alert.time.toLocaleTimeString('zh-CN')}
+                    {hasNavigation && <span className="ml-2 text-amber-400">点击跳转定位</span>}
                   </p>
                 </div>
                 <button
-                  onClick={() => resolveAlert(alert.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    resolveAlert(alert.id);
+                  }}
                   className="text-slate-500 hover:text-white transition-colors p-0.5"
                 >
                   <X className="w-4 h-4" />

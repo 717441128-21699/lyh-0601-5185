@@ -15,6 +15,7 @@ import type {
   MaintenanceWorkOrder,
   StaffRole,
   HallStatus,
+  ScheduleConflict,
 } from '../types';
 import {
   mockHalls,
@@ -146,6 +147,7 @@ interface AppState {
   getSlotUsageRate: () => number;
   repairIncompleteSchedules: () => void;
   autoAssignMissingResources: (scheduleId: string) => { success: boolean; message: string };
+  resolveScheduleConflict: (scheduleId: string, staffId?: string, vehicleId?: string) => { success: boolean; message: string };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -463,6 +465,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           resolved: false,
           source: 'services',
           relatedId: newAppointment.id,
+          navigateTo: {
+            page: 'services',
+            highlightId: newAppointment.id,
+          },
         });
       }
     }
@@ -493,6 +499,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           resolved: false,
           source: 'services',
           relatedId: newAppointment.id,
+          navigateTo: {
+            page: 'services',
+            highlightId: newAppointment.id,
+          },
         });
       }
     }
@@ -526,6 +536,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             resolved: false,
             source: 'services',
             relatedId: newAppointment.id,
+            navigateTo: {
+              page: 'services',
+              highlightId: newAppointment.id,
+            },
           });
         }
         if (!driver) {
@@ -537,6 +551,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             resolved: false,
             source: 'services',
             relatedId: newAppointment.id,
+            navigateTo: {
+              page: 'services',
+              highlightId: newAppointment.id,
+            },
           });
         }
       }
@@ -585,9 +603,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newSpec = req.spec || oldSpec;
     const newPriority = req.priority !== undefined ? req.priority : oldAppt.priority;
     const newAttendees = req.attendees !== undefined ? req.attendees : oldAppt.attendees;
+    const now = new Date();
+
+    let newStatus: Appointment['status'] = oldAppt.status;
+    let newProgress = oldAppt.progress;
+
+    if (newStartTime > now) {
+      newStatus = 'scheduled';
+      newProgress = 0;
+    } else if (newEndTime <= now) {
+      newStatus = 'completed';
+      newProgress = 100;
+    } else if (oldAppt.status === 'scheduled' && now >= newStartTime) {
+      newStatus = 'in_progress';
+      const total = newEndTime.getTime() - newStartTime.getTime();
+      const elapsed = now.getTime() - newStartTime.getTime();
+      newProgress = Math.min(100, Math.max(0, (elapsed / total) * 100));
+    } else if (oldAppt.status === 'in_progress') {
+      const total = newEndTime.getTime() - newStartTime.getTime();
+      const elapsed = now.getTime() - newStartTime.getTime();
+      newProgress = Math.min(100, Math.max(0, (elapsed / total) * 100));
+      newStatus = newProgress >= 100 ? 'completed' : 'in_progress';
+    }
 
     const appointmentsWithoutOld = state.appointments.filter((a) => a.id !== oldAppt.id);
-    const schedulesWithoutOld = state.schedules.filter((s) => s.appointmentId !== oldAppt.id);
+    const oldSchedules = state.schedules.filter((s) => s.appointmentId === oldAppt.id);
 
     const conflicts: AllocationResult['conflicts'] = [];
     let adjustedAppointments: Appointment[] = [...appointmentsWithoutOld];
@@ -676,115 +716,196 @@ export const useAppStore = create<AppState>((set, get) => ({
       endTime: newEndTime,
       priority: newPriority,
       attendees: newAttendees,
+      status: newStatus,
+      progress: newProgress,
     };
 
-    const newSchedules: ServiceSchedule[] = [...schedulesWithoutOld];
+    const scheduleConflicts: ScheduleConflict[] = [];
+    const updatedSchedules: ServiceSchedule[] = state.schedules.filter(
+      (s) => s.appointmentId !== oldAppt.id,
+    );
     const scheduleAlerts: AlertItem[] = [];
 
-    if (oldAppt.needsEmcee) {
-      const emcee = findAvailableStaff(state.staff, newSchedules, '司仪', newStartTime, newEndTime);
-      if (emcee) {
-        newSchedules.push({
-          id: generateId('sch'),
-          staffId: emcee.id,
-          type: '司仪',
-          startTime: newStartTime,
-          endTime: newEndTime,
-          status: 'pending',
-          confirmed: false,
-          familyName: oldAppt.familyName,
-          escalated: false,
-          confirmDeadline: new Date(newStartTime.getTime() - 30 * 60000),
-          appointmentId: oldAppt.id,
-        });
-      } else {
-        scheduleAlerts.push({
-          id: generateId('alert'),
-          type: 'warning',
-          message: `${oldAppt.familyName} 调整预约后，无可用司仪资源`,
-          time: new Date(),
-          resolved: false,
-          source: 'services',
-          relatedId: oldAppt.id,
-        });
-      }
-    }
+    if (!req.skipSchedules && (req.startTime || req.durationMinutes)) {
+      for (const oldSch of oldSchedules) {
+        const schStartTimeOffset = oldSch.startTime.getTime() - oldAppt.startTime.getTime();
+        const schEndTimeOffset = oldSch.endTime.getTime() - oldAppt.endTime.getTime();
+        const newSchStartTime = new Date(newStartTime.getTime() + schStartTimeOffset);
+        const newSchEndTime = new Date(newEndTime.getTime() + schEndTimeOffset);
 
-    if (oldAppt.needsBand) {
-      const band = findAvailableStaff(state.staff, newSchedules, '乐队', newStartTime, newEndTime);
-      if (band) {
-        newSchedules.push({
-          id: generateId('sch'),
-          staffId: band.id,
-          type: '乐队',
-          startTime: newStartTime,
-          endTime: newEndTime,
-          status: 'pending',
-          confirmed: false,
-          familyName: oldAppt.familyName,
-          escalated: false,
-          confirmDeadline: new Date(newStartTime.getTime() - 30 * 60000),
-          appointmentId: oldAppt.id,
-        });
-      } else {
-        scheduleAlerts.push({
-          id: generateId('alert'),
-          type: 'warning',
-          message: `${oldAppt.familyName} 调整预约后，无可用乐队资源`,
-          time: new Date(),
-          resolved: false,
-          source: 'services',
-          relatedId: oldAppt.id,
-        });
-      }
-    }
+        let newStaffId = oldSch.staffId;
+        let newVehicleId = oldSch.vehicleId;
+        let hasConflict = false;
+        const conflict: ScheduleConflict = {
+          scheduleId: oldSch.id,
+          type: oldSch.type,
+          currentStaffId: oldSch.staffId,
+          currentStaffName: oldSch.staffId
+            ? state.staff.find((s) => s.id === oldSch.staffId)?.name
+            : undefined,
+          currentVehicleId: oldSch.vehicleId,
+          currentVehiclePlate: oldSch.vehicleId
+            ? state.vehicles.find((v) => v.id === oldSch.vehicleId)?.plateNumber
+            : undefined,
+          availableStaffOptions: [],
+          availableVehicleOptions: [],
+        };
 
-    if (oldAppt.needsVehicle) {
-      const vehicle = findAvailableVehicle(state.vehicles, newSchedules, newStartTime, newEndTime);
-      if (vehicle) {
-        const driver = findAvailableStaff(state.staff, newSchedules, '灵车司机', newStartTime, newEndTime);
-        if (driver) {
-          newSchedules.push({
-            id: generateId('sch'),
-            vehicleId: vehicle.id,
-            staffId: driver.id,
-            type: '车辆调度',
-            startTime: new Date(newStartTime.getTime() - 30 * 60000),
-            endTime: new Date(newEndTime.getTime() + 30 * 60000),
-            status: 'pending',
-            confirmed: false,
-            familyName: oldAppt.familyName,
-            escalated: false,
-            confirmDeadline: new Date(newStartTime.getTime() - 60 * 60000),
-            appointmentId: oldAppt.id,
-          });
-        } else {
+        if (oldSch.staffId) {
+          const staffConflicts = updatedSchedules.some(
+            (s) =>
+              s.id !== oldSch.id &&
+              s.staffId === oldSch.staffId &&
+              timesOverlap(newSchStartTime, newSchEndTime, s.startTime, s.endTime),
+          );
+          if (staffConflicts) {
+            hasConflict = true;
+            const allStaff = state.staff.filter((s) => s.role === oldSch.type || (oldSch.type === '车辆调度' && s.role === '灵车司机'));
+            for (const sf of allStaff) {
+              const isAvailable = !updatedSchedules.some(
+                (s) =>
+                  s.id !== oldSch.id &&
+                  s.staffId === sf.id &&
+                  timesOverlap(newSchStartTime, newSchEndTime, s.startTime, s.endTime),
+              );
+              if (isAvailable) {
+                conflict.availableStaffOptions?.push({ id: sf.id, name: sf.name });
+              } else {
+                const overlappingSch = updatedSchedules.find(
+                  (s) =>
+                    s.id !== oldSch.id &&
+                    s.staffId === sf.id &&
+                    timesOverlap(newSchStartTime, newSchEndTime, s.startTime, s.endTime),
+                );
+                conflict.availableStaffOptions?.push({
+                  id: sf.id,
+                  name: sf.name,
+                  conflictReason: overlappingSch
+                    ? `与 ${overlappingSch.familyName} 冲突`
+                    : '时间冲突',
+                });
+              }
+            }
+          }
+        }
+
+        if (oldSch.vehicleId) {
+          const vehicleConflicts = updatedSchedules.some(
+            (s) =>
+              s.id !== oldSch.id &&
+              s.vehicleId === oldSch.vehicleId &&
+              timesOverlap(newSchStartTime, newSchEndTime, s.startTime, s.endTime),
+          );
+          if (vehicleConflicts) {
+            hasConflict = true;
+            const allVehicles = state.vehicles.filter((v) => v.type === '灵车');
+            for (const vh of allVehicles) {
+              const isAvailable = !updatedSchedules.some(
+                (s) =>
+                  s.id !== oldSch.id &&
+                  s.vehicleId === vh.id &&
+                  timesOverlap(newSchStartTime, newSchEndTime, s.startTime, s.endTime),
+              );
+              if (isAvailable) {
+                conflict.availableVehicleOptions?.push({ id: vh.id, name: vh.plateNumber });
+              } else {
+                const overlappingSch = updatedSchedules.find(
+                  (s) =>
+                    s.id !== oldSch.id &&
+                    s.vehicleId === vh.id &&
+                    timesOverlap(newSchStartTime, newSchEndTime, s.startTime, s.endTime),
+                );
+                conflict.availableVehicleOptions?.push({
+                  id: vh.id,
+                  name: vh.plateNumber,
+                  conflictReason: overlappingSch
+                    ? `与 ${overlappingSch.familyName} 冲突`
+                    : '时间冲突',
+                });
+              }
+            }
+          }
+        }
+
+        if (hasConflict) {
+          scheduleConflicts.push(conflict);
+          const firstAvailableStaff = conflict.availableStaffOptions?.find((o) => !o.conflictReason);
+          const firstAvailableVehicle = conflict.availableVehicleOptions?.find((o) => !o.conflictReason);
+          if (firstAvailableStaff) newStaffId = firstAvailableStaff.id;
+          if (firstAvailableVehicle) newVehicleId = firstAvailableVehicle.id;
+
           scheduleAlerts.push({
             id: generateId('alert'),
             type: 'warning',
-            message: `${oldAppt.familyName} 调整预约后，无可用灵车司机`,
+            message: `${oldAppt.familyName} 调整时间后，${oldSch.type}资源冲突，已自动切换到 ${
+              firstAvailableStaff?.name || firstAvailableVehicle?.name || '无可用资源'
+            }，请确认或手动选择替换方案`,
             time: new Date(),
             resolved: false,
             source: 'services',
-            relatedId: oldAppt.id,
+            relatedId: oldSch.id,
+            navigateTo: {
+              page: 'services',
+              highlightId: oldSch.id,
+            },
           });
         }
-      } else {
-        scheduleAlerts.push({
-          id: generateId('alert'),
-          type: 'warning',
-          message: `${oldAppt.familyName} 调整预约后，无可用车辆`,
-          time: new Date(),
-          resolved: false,
-          source: 'services',
-          relatedId: oldAppt.id,
-        });
+
+        const updatedSch: ServiceSchedule = {
+          ...oldSch,
+          startTime: newSchStartTime,
+          endTime: newSchEndTime,
+          confirmDeadline: new Date(newSchStartTime.getTime() - (oldSch.type === '车辆调度' ? 60 : 30) * 60000),
+          staffId: newStaffId,
+          vehicleId: newVehicleId,
+          confirmed: hasConflict ? false : oldSch.confirmed,
+          status: hasConflict ? 'pending' : oldSch.status,
+          escalated: hasConflict ? false : oldSch.escalated,
+        };
+        updatedSchedules.push(updatedSch);
+      }
+    } else {
+      updatedSchedules.push(...oldSchedules);
+    }
+
+    if (conflicts.length > 0) {
+      for (const c of conflicts) {
+        if (c.adjusted && c.appointmentId !== oldAppt.id) {
+          scheduleAlerts.push({
+            id: generateId('alert'),
+            type: 'warning',
+            message: `${c.familyName} 的告别厅因更高优先级预约被调整到 ${c.newHallName}`,
+            time: new Date(),
+            resolved: false,
+            source: 'farewell',
+            relatedId: c.appointmentId,
+            navigateTo: {
+              page: 'farewell',
+              highlightId: c.appointmentId,
+              highlightDate: newStartTime.toISOString().slice(0, 10),
+            },
+          });
+        }
       }
     }
 
+    const activeAppointmentIds = [...adjustedAppointments, updatedAppointment]
+      .filter((a) => a.status === 'in_progress')
+      .map((a) => a.hallId);
+
+    const updatedHalls = state.halls.map((h) => {
+      if (h.status === 'maintenance') return h;
+      const hasActive = activeAppointmentIds.includes(h.id);
+      const hasScheduled = [...adjustedAppointments, updatedAppointment].some(
+        (a) => a.hallId === h.id && a.status === 'scheduled',
+      );
+      const newStatus: HallStatus = hasActive ? 'in_use' : hasScheduled ? 'reserved' : 'available';
+      return { ...h, status: newStatus };
+    });
+
     const hallChanged = oldAppt.hallId !== targetHall.id;
     const result: AllocationResult = {
-      status: conflicts.length > 0 || hallChanged ? 'conflict' : 'success',
+      status: conflicts.length > 0 || hallChanged || scheduleConflicts.length > 0 ? 'conflict' : 'success',
       assignedHallId: targetHall.id,
       assignedHallName: targetHall.name,
       conflicts: hallChanged && !conflicts.find(c => c.appointmentId === oldAppt.id)
@@ -801,16 +922,20 @@ export const useAppStore = create<AppState>((set, get) => ({
             ...conflicts,
           ]
         : conflicts,
-      message: conflicts.length > 0
-        ? `已重新分配到 ${targetHall.name}，有 ${conflicts.length} 个预约被调整`
-        : hallChanged
-          ? `已调整至 ${targetHall.name}`
-          : `预约信息已更新`,
+      scheduleConflicts,
+      message: scheduleConflicts.length > 0
+        ? `预约已更新，有 ${scheduleConflicts.length} 个服务排班资源冲突，已自动切换可用资源`
+        : conflicts.length > 0
+          ? `已重新分配到 ${targetHall.name}，有 ${conflicts.length} 个预约被调整`
+          : hallChanged
+            ? `已调整至 ${targetHall.name}`
+            : `预约信息已更新`,
     };
 
     set((s) => ({
       appointments: [...adjustedAppointments, updatedAppointment],
-      schedules: newSchedules,
+      halls: updatedHalls,
+      schedules: updatedSchedules,
       alerts: [...s.alerts, ...scheduleAlerts],
       lastAllocationResult: result,
     }));
@@ -1040,6 +1165,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           resolved: false,
           source: 'services',
           relatedId: s.id,
+          navigateTo: {
+            page: 'services',
+            highlightId: s.id,
+          },
         });
         updatedSchedules[i] = { ...s, escalated: true, status: 'escalated' as const };
         repairedCount++;
@@ -1052,5 +1181,41 @@ export const useAppStore = create<AppState>((set, get) => ({
         alerts: [...state.alerts, ...newAlerts],
       });
     }
+  },
+
+  resolveScheduleConflict: (scheduleId: string, staffId?: string, vehicleId?: string) => {
+    const state = get();
+    const schedule = state.schedules.find((s) => s.id === scheduleId);
+
+    if (!schedule) {
+      return { success: false, message: '排班记录不存在' };
+    }
+
+    if (staffId && !state.staff.find((s) => s.id === staffId)) {
+      return { success: false, message: '指定的人员不存在' };
+    }
+    if (vehicleId && !state.vehicles.find((v) => v.id === vehicleId)) {
+      return { success: false, message: '指定的车辆不存在' };
+    }
+
+    set((s) => ({
+      schedules: s.schedules.map((sch) =>
+        sch.id === scheduleId
+          ? {
+              ...sch,
+              staffId: staffId !== undefined ? staffId : sch.staffId,
+              vehicleId: vehicleId !== undefined ? vehicleId : sch.vehicleId,
+              confirmed: false,
+              status: 'pending' as const,
+              escalated: false,
+            }
+          : sch,
+      ),
+    }));
+
+    return {
+      success: true,
+      message: '资源已更新，请确认排班',
+    };
   },
 }));

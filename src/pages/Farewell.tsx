@@ -1,6 +1,8 @@
 import Scene3D from '../components/3d/Scene3D';
+import HallTimeline from '../components/business/HallTimeline';
 import { useAppStore } from '../store/useAppStore';
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { NewAppointmentRequest, UpdateAppointmentRequest, Appointment } from '../types';
 import {
   DoorOpen,
@@ -22,6 +24,8 @@ import {
   Car,
   X,
   Pencil,
+  List,
+  LayoutGrid,
 } from 'lucide-react';
 
 export default function Farewell() {
@@ -33,7 +37,25 @@ export default function Farewell() {
   const clearAllocationResult = useAppStore((s) => s.clearAllocationResult);
   const updateProgress = useAppStore((s) => s.updateProgress);
   const updateTemperatures = useAppStore((s) => s.updateTemperatures);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [, setTick] = useState(0);
+
+  const highlightId = searchParams.get('highlight') || undefined;
+  const highlightDate = searchParams.get('date') || undefined;
+  const [viewMode, setViewMode] = useState<'list' | 'timeline'>('timeline');
+
+  useEffect(() => {
+    if (highlightId) {
+      const timer = setTimeout(() => {
+        setSearchParams((prev) => {
+          prev.delete('highlight');
+          prev.delete('date');
+          return prev;
+        });
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightId, setSearchParams]);
 
   useEffect(() => {
     const t1 = setInterval(() => {
@@ -188,6 +210,30 @@ export default function Farewell() {
               <CheckCircle2 className="w-4 h-4 text-green-400" />
               <span className="text-green-300 text-sm">空闲：{availableCount}</span>
             </div>
+            <div className="flex items-center bg-slate-700/50 rounded-lg p-0.5 border border-slate-600">
+              <button
+                onClick={() => setViewMode('list')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-amber-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-600/50'
+                }`}
+              >
+                <List className="w-4 h-4" />
+                列表
+              </button>
+              <button
+                onClick={() => setViewMode('timeline')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                  viewMode === 'timeline'
+                    ? 'bg-amber-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-600/50'
+                }`}
+              >
+                <LayoutGrid className="w-4 h-4" />
+                时间轴
+              </button>
+            </div>
             <button
               onClick={() => setShowForm(true)}
               className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-lg transition-all shadow-lg shadow-amber-900/30 font-medium"
@@ -282,73 +328,82 @@ export default function Farewell() {
               </div>
             )}
 
-            <div className="border-t border-slate-700 p-4">
-              <h4 className="text-sm text-slate-300 mb-3 flex items-center gap-2">
-                <CalendarDays className="w-4 h-4 text-amber-400" />
-                预约时间表（按优先级排序，优先级1最高）
-              </h4>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-slate-400 border-b border-slate-700">
-                      <th className="text-left py-2 px-2">优先级</th>
-                      <th className="text-left py-2 px-2">家属</th>
-                      <th className="text-left py-2 px-2">厅室</th>
-                      <th className="text-left py-2 px-2">开始时间</th>
-                      <th className="text-left py-2 px-2">结束时间</th>
-                      <th className="text-left py-2 px-2">状态</th>
-                      <th className="text-left py-2 px-2">服务</th>
-                      <th className="text-left py-2 px-2">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedAppointments.filter(a => a.status !== 'completed').map((apt) => (
-                      <tr key={apt.id} className="border-b border-slate-800 hover:bg-slate-800/30">
-                        <td className="py-2 px-2">
-                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                            apt.priority === 1 ? 'bg-red-900/50 text-red-400' : apt.priority === 2 ? 'bg-amber-900/50 text-amber-400' : 'bg-blue-900/50 text-blue-400'
-                          }`}>
-                            P{apt.priority}
-                          </span>
-                        </td>
-                        <td className="py-2 px-2 text-white font-medium">{apt.familyName}</td>
-                        <td className="py-2 px-2 text-slate-300">{halls.find(h => h.id === apt.hallId)?.name}</td>
-                        <td className="py-2 px-2 text-slate-300 font-mono text-xs">
-                          {apt.startTime.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                        </td>
-                        <td className="py-2 px-2 text-slate-300 font-mono text-xs">
-                          {apt.endTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                        </td>
-                        <td className="py-2 px-2">
-                          <span className={`text-xs ${
-                            apt.status === 'in_progress' ? 'text-green-400' : apt.status === 'scheduled' ? 'text-amber-400' : 'text-slate-500'
-                          }`}>
-                            {apt.status === 'in_progress' ? '进行中' : apt.status === 'scheduled' ? '已预约' : '已完成'}
-                          </span>
-                        </td>
-                        <td className="py-2 px-2">
-                          <div className="flex items-center gap-1">
-                            {apt.needsEmcee && <Mic className="w-3.5 h-3.5 text-blue-400" aria-label="司仪" />}
-                            {apt.needsBand && <Music className="w-3.5 h-3.5 text-purple-400" aria-label="乐队" />}
-                            {apt.needsVehicle && <Car className="w-3.5 h-3.5 text-emerald-400" aria-label="灵车" />}
-                          </div>
-                        </td>
-                        <td className="py-2 px-2">
-                          <button
-                            onClick={() => openEditForm(apt)}
-                            className="flex items-center gap-1 px-2 py-1 bg-slate-700/50 hover:bg-amber-600/30 text-slate-300 hover:text-amber-300 rounded text-xs transition-colors"
-                            title="编辑预约（调整时间、规格、优先级后自动重新分配厅室）"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            编辑
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {viewMode === 'timeline' ? (
+              <div className="p-4">
+                <HallTimeline
+                  highlightId={highlightId}
+                  onAppointmentClick={(apt) => openEditForm(apt)}
+                />
               </div>
-            </div>
+            ) : (
+              <div className="border-t border-slate-700 p-4">
+                <h4 className="text-sm text-slate-300 mb-3 flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-amber-400" />
+                  预约时间表（按优先级排序，优先级1最高）
+                </h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-700">
+                        <th className="text-left py-2 px-2">优先级</th>
+                        <th className="text-left py-2 px-2">家属</th>
+                        <th className="text-left py-2 px-2">厅室</th>
+                        <th className="text-left py-2 px-2">开始时间</th>
+                        <th className="text-left py-2 px-2">结束时间</th>
+                        <th className="text-left py-2 px-2">状态</th>
+                        <th className="text-left py-2 px-2">服务</th>
+                        <th className="text-left py-2 px-2">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedAppointments.filter(a => a.status !== 'completed').map((apt) => (
+                        <tr key={apt.id} className={`border-b border-slate-800 hover:bg-slate-800/30 ${highlightId === apt.id ? 'bg-amber-900/20' : ''}`}>
+                          <td className="py-2 px-2">
+                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                              apt.priority === 1 ? 'bg-red-900/50 text-red-400' : apt.priority === 2 ? 'bg-amber-900/50 text-amber-400' : 'bg-blue-900/50 text-blue-400'
+                            }`}>
+                              P{apt.priority}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2 text-white font-medium">{apt.familyName}</td>
+                          <td className="py-2 px-2 text-slate-300">{halls.find(h => h.id === apt.hallId)?.name}</td>
+                          <td className="py-2 px-2 text-slate-300 font-mono text-xs">
+                            {apt.startTime.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="py-2 px-2 text-slate-300 font-mono text-xs">
+                            {apt.endTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="py-2 px-2">
+                            <span className={`text-xs ${
+                              apt.status === 'in_progress' ? 'text-green-400' : apt.status === 'scheduled' ? 'text-amber-400' : 'text-slate-500'
+                            }`}>
+                              {apt.status === 'in_progress' ? '进行中' : apt.status === 'scheduled' ? '已预约' : '已完成'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2">
+                            <div className="flex items-center gap-1">
+                              {apt.needsEmcee && <Mic className="w-3.5 h-3.5 text-blue-400" aria-label="司仪" />}
+                              {apt.needsBand && <Music className="w-3.5 h-3.5 text-purple-400" aria-label="乐队" />}
+                              {apt.needsVehicle && <Car className="w-3.5 h-3.5 text-emerald-400" aria-label="灵车" />}
+                            </div>
+                          </td>
+                          <td className="py-2 px-2">
+                            <button
+                              onClick={() => openEditForm(apt)}
+                              className="flex items-center gap-1 px-2 py-1 bg-slate-700/50 hover:bg-amber-600/30 text-slate-300 hover:text-amber-300 rounded text-xs transition-colors"
+                              title="编辑预约（调整时间、规格、优先级后自动重新分配厅室）"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              编辑
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="w-96 border-l border-slate-700 bg-slate-900/50 overflow-y-auto p-4 space-y-3">
@@ -362,11 +417,12 @@ export default function Farewell() {
               const remaining = apt && apt.status === 'in_progress'
                 ? Math.max(0, Math.round((apt.endTime.getTime() - Date.now()) / 60000))
                 : null;
+              const isHighlighted = apt && (highlightId === apt.id || (lastAllocationResult?.conflicts || []).some(c => c.appointmentId === apt.id));
 
               return (
                 <div
                   key={hall.id}
-                  className={`${status.bg} border rounded-xl p-4 transition-all hover:scale-[1.01]`}
+                  className={`${status.bg} border rounded-xl p-4 transition-all hover:scale-[1.01] ${isHighlighted ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-900' : ''}`}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2">
